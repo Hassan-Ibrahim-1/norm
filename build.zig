@@ -14,6 +14,7 @@ pub fn build(b: *std.Build) void {
         .files = &.{
             "src/main.cpp",
         },
+        .flags = &.{ "-std=c++17", "-Wall", "-Werror" },
     });
 
     const exe = b.addExecutable(.{
