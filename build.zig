@@ -13,8 +13,16 @@ pub fn build(b: *std.Build) void {
     exe_mod.addCSourceFiles(.{
         .files = &.{
             "src/main.cpp",
+            "src/debug.cpp",
         },
-        .flags = &.{ "-std=c++17", "-Wall", "-Werror" },
+        .flags = switch (optimize) {
+            .Debug => &.{ "-std=c++17", "-Wall", "-Werror", "-g", "-O0" },
+
+            .ReleaseFast,
+            .ReleaseSafe,
+            .ReleaseSmall,
+            => &.{ "-std=c++17", "-Wall", "-Werror", "-O3" },
+        },
     });
 
     const exe = b.addExecutable(.{

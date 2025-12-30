@@ -46,3 +46,72 @@ struct Slice {
         return result;
     }
 };
+
+template<typename T>
+class Option {
+    T value;
+    bool has_value;
+
+  public:
+    Option<T>() : has_value(false) {}
+
+    Option<T>(T value) : value(value), has_value(true) {}
+
+    T unwrap() const {
+        assert(has_value);
+        return value;
+    }
+
+    T unwrap_or(T or_else) const {
+        return has_value ? value : or_else;
+    }
+
+    bool is_null() const {
+        return !has_value;
+    }
+};
+
+template<typename T, typename E>
+class Result {
+    union U {
+        T ok;
+        E error;
+
+        U(T ok) : ok(ok) {}
+
+        U(E error) : error(error) {}
+
+    } value;
+
+    bool _ok;
+
+  public:
+    Result<T, E>(T value) : value(value), _ok(true) {}
+
+    Result<T, E>(E error) : value(error), _ok(false) {}
+
+    T unwrap() const {
+        assert(_ok);
+        return value.ok;
+    }
+
+    T unwrap_or(T or_else) const {
+        return _ok ? value.ok : or_else;
+    }
+
+    Option<T> ok() const {
+        return _ok ? Option(value.ok) : Option<T>();
+    }
+
+    Option<E> err() const {
+        return !_ok ? Option(value.error) : Option<E>();
+    }
+
+    bool is_ok() const {
+        return _ok;
+    }
+
+    bool is_err() const {
+        return !_ok;
+    }
+};

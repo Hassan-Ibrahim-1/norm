@@ -2,12 +2,16 @@
 
 #include "common.h"
 
+enum class Error {
+    ERR,
+};
+
+std::string to_string(Error e) {
+    return "ERR";
+}
+
 int main() {
-    int data[5] = {1, 2, 3, 4, 5};
-
-    Slice<int> slice(data, 5);
-
-    std::cout << slice.to_string() << "\n";
-
+    Result<int, Error> res(Error::ERR);
+    std::cout << to_string(res.err().unwrap()) << "\n";
     return 0;
 }
