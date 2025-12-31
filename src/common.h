@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <type_traits>
 
 using u8 = std::uint8_t;
 using u16 = std::uint16_t;
@@ -118,6 +119,9 @@ struct Slice {
     }
 
     std::string to_string() const {
+        if constexpr (std::is_same_v<T, char>) {
+            return std::string(data, len);
+        }
         std::string result = "{ ";
         for (u64 i = 0; i < len; ++i) {
             if (i > 0) {
@@ -161,3 +165,5 @@ struct Slice {
         return {};
     }
 };
+
+using String = Slice<char>;
