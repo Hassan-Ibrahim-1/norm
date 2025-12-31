@@ -17,24 +17,28 @@ using i64 = std::int64_t;
 template<typename T>
 class Option {
     T value;
-    bool has_value;
+    bool _has_value;
 
   public:
-    Option<T>() : has_value(false) {}
+    Option<T>() : value {}, _has_value(false) {}
 
-    Option<T>(T value) : value(value), has_value(true) {}
+    Option<T>(T value) : value(value), _has_value(true) {}
 
     T unwrap() const {
-        assert(has_value);
+        assert(_has_value);
         return value;
     }
 
     T unwrap_or(T or_else) const {
-        return has_value ? value : or_else;
+        return _has_value ? value : or_else;
     }
 
     bool is_null() const {
-        return !has_value;
+        return !_has_value;
+    }
+
+    bool has_value() const {
+        return _has_value;
     }
 };
 
@@ -167,3 +171,51 @@ struct Slice {
 };
 
 using String = Slice<char>;
+
+template<typename T>
+struct SinglyLinkedList {
+    struct Node {
+        T value;
+        Option<Node*> next;
+
+        Node(T value) : value(value), next() {}
+
+        void insert_after(Node* new_node) {
+            new_node->next = next;
+            next = new_node;
+        }
+
+        Option<Node*> remove_next() {
+            if (next.is_null())
+                return {};
+            Node* n = next.unwrap();
+            next = n->next;
+            return n;
+        }
+    };
+
+    Option<Node*> first;
+
+    SinglyLinkedList() : first() {}
+
+    void prepend(Node* new_node) {
+        new_node->next = first;
+        first = new_node;
+    }
+
+    void remove(Node* node) {
+        Node* current = first.unwrap();
+        while (current != node) {
+            current = current->next.unwrap();
+        }
+        current->next = node->next;
+    }
+
+    Option<Node*> pop_first() {
+        if (first.is_null())
+            return {};
+        Node* f = first.unwrap();
+        first = f->next;
+        return f;
+    }
+};
