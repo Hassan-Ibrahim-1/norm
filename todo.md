@@ -1,8 +1,8 @@
 ### Prereq stuff
 
-* Allocators
 ** Slice type
-* Result type
-* Option type
-* String type
+** Result type
+** Option type
+** String type
+* Allocators
 * Testing

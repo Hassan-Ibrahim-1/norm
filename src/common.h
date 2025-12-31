@@ -1,51 +1,17 @@
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
-template<typename T>
-struct Slice {
-    T* data;
-    std::size_t len;
+using u8 = std::uint8_t;
+using u16 = std::uint16_t;
+using u32 = std::uint32_t;
+using u64 = std::uint64_t;
 
-    Slice(T* data, std::size_t len) : data(data), len(len) {}
-
-    Slice<T> subslice(std::size_t start, std::size_t end) {
-        assert(end <= len);
-        assert(start <= end);
-
-        return Slice(data + start, end - start);
-    }
-
-    T& at(std::size_t index) {
-        assert(index < len);
-        return *(data + index);
-    }
-
-    const T& at(std::size_t index) const {
-        assert(index < len);
-        return *(data + index);
-    }
-
-    T& operator[](std::size_t index) {
-        return at(index);
-    }
-
-    const T& operator[](std::size_t index) const {
-        return at(index);
-    }
-
-    std::string to_string() const {
-        std::string result = "{ ";
-        for (std::size_t i = 0; i < len; ++i) {
-            if (i > 0) {
-                result += ", ";
-            }
-            result += std::to_string(data[i]);
-        }
-        result += " }";
-        return result;
-    }
-};
+using i8 = std::int8_t;
+using i16 = std::int16_t;
+using i32 = std::int32_t;
+using i64 = std::int64_t;
 
 template<typename T>
 class Option {
@@ -113,5 +79,85 @@ class Result {
 
     bool is_err() const {
         return !_ok;
+    }
+};
+
+template<typename T>
+struct Slice {
+    T* data;
+    u64 len;
+
+    using iterator = T*;
+    using const_iterator = const T*;
+
+    Slice(T* data, u64 len) : data(data), len(len) {}
+
+    Slice<T> subslice(u64 start, std::size_t end) {
+        assert(end <= len);
+        assert(start <= end);
+
+        return Slice(data + start, end - start);
+    }
+
+    T& at(u64 index) {
+        assert(index < len);
+        return *(data + index);
+    }
+
+    const T& at(u64 index) const {
+        assert(index < len);
+        return *(data + index);
+    }
+
+    T& operator[](u64 index) {
+        return at(index);
+    }
+
+    const T& operator[](u64 index) const {
+        return at(index);
+    }
+
+    std::string to_string() const {
+        std::string result = "{ ";
+        for (u64 i = 0; i < len; ++i) {
+            if (i > 0) {
+                result += ", ";
+            }
+            result += std::to_string(data[i]);
+        }
+        result += " }";
+        return result;
+    }
+
+    iterator begin() {
+        return data;
+    }
+
+    iterator end() {
+        return data + len;
+    }
+
+    const_iterator begin() const {
+        return data;
+    }
+
+    const_iterator end() const {
+        return data + len;
+    }
+
+    const_iterator cbegin() const {
+        return data;
+    }
+
+    const_iterator cend() const {
+        return data + len;
+    }
+
+    Option<u64> index_of(T target) const {
+        for (int i = 0; i < len; i += 1) {
+            if (target == data[i])
+                return static_cast<u64>(i);
+        }
+        return {};
     }
 };
