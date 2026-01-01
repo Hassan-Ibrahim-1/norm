@@ -29,7 +29,8 @@ main := fn () {
     value := add(2, 3) // This is a constant
     io.print("{value}")
 
-    mut x := 0
+    // This is a comment
+    mut x: int = 0
     x += 1
     io.print("{x}")
 
@@ -37,6 +38,20 @@ main := fn () {
     for i := range 10 {
         io.print("{}", i)
     }
+}
+
+read_all := fn () io.FileError!string {
+    f := try io.open_file("file.txt", "r")
+    return try f.read_all()
+}
+
+index_of := fn (s: string, target: u8) ?int {
+    for i, c := range s {
+        if c == target {
+            return i
+        }
+    }
+    return null;
 }
 
 ```
@@ -68,6 +83,8 @@ Vec2 := struct {
 
 Linked list of buffers. If current buf gets full allocate a new one and start
 using that.
+
+How does alignment play into this?
 
 Can only free the top of a buffer (pop).
 
