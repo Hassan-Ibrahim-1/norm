@@ -3,15 +3,19 @@
 #include "common.h"
 
 int main() {
-    SinglyLinkedList<int> ll = {};
-    SinglyLinkedList<int>::Node node(10);
-    SinglyLinkedList<int>::Node node2(20);
+    auto cap = 1024 * sizeof(u64);
+    BumpAllocator alloc(cap);
 
-    ll.prepend(&node);
-    node.insert_after(&node2);
+    assert(alloc.capacity == cap);
+    assert(alloc.data != nullptr);
 
-    auto n = node.remove_next();
-    assert(n.unwrap() == &node2);
+    Slice<u64> slice = alloc.alloc<u64>(1024).unwrap();
 
-    return 0;
+    for (int i = 0; i < slice.len; i++) {
+        slice[i] = i + 1;
+    }
+
+    std::cout << slice.to_string() << "\n";
+
+    alloc.free();
 }

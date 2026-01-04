@@ -27,16 +27,16 @@ add := fn (x, y: int) int {
 
 main := fn () {
     value := add(2, 3) // This is a constant
-    io.print("{value}")
+    io.println("{value}")
 
     // This is a comment
     mut x: int = 0
     x += 1
-    io.print("{x}")
+    io.println("{x}")
 
     // no mut allowed here
     for i := range 10 {
-        io.print("{}", i)
+        io.println("{}", i)
     }
 }
 
@@ -74,6 +74,34 @@ Vec2 := struct {
         // otherwise {x: x, y: y}
         return {x, y}
     }
+}
+
+// all enum tags have a predefined `int` field
+Direction := enum(u32) {
+    up,
+    down,
+    right,
+    left,
+}
+
+switch_stmt := fn () {
+    x := Direction.up
+
+    is_up := switch x {
+        .up => true,
+        else => false,
+    }
+
+    // OR
+    is_up2 := if x == .up {
+        ret_if true
+    } else {
+        ret_if false
+    }
+}
+
+var_args := fn(fmt: string, x: any...) {
+    io.println(fmt, x)
 }
 
 ```
