@@ -22,6 +22,24 @@ inline bool is_pow2(u64 n) {
     return (n & (n - 1)) == 0;
 }
 
+inline void* raw_alloc(u64 len) {
+    auto data = mmap(
+        NULL,
+        len,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS,
+        -1,
+        0
+    );
+    assert(data != MAP_FAILED);
+    return data;
+}
+
+inline void raw_free(void* data, u64 size) {
+    int err = munmap(data, size);
+    assert(err != -1);
+}
+
 inline u64 align_pow2_backward(u64 address, u64 alignment) {
     assert(is_pow2(alignment));
     // 000010000 // example alignment
@@ -318,7 +336,7 @@ struct BumpAllocator {
         }
 
         end_index = new_index + size;
-        return reinterpret_cast<T*>(data + new_index);
+        return static_cast<T*>(data + new_index);
     }
 
     template<typename T>
@@ -336,11 +354,46 @@ class ArenaAllocator {
         u8 data[];
     };
 
+    ArenaAllocator() {}
+
     SinglyLinkedList<BufNode> buffer_list;
     u64 end_index;
 
     template<typename T>
-    Slice<T> alloc(u64 count, u64 alignment);
+    Slice<T> alloc_aligned(u64 count, u64 alignment) {
+        assert(count > 0);
+
+        alignment = std::max<u64>(alignof(T), alignment);
+        auto size = count * sizeof(T);
+
+        if (buffer_list.first.is_null()) {
+            buffer_list.first = create_node(0, size);
+        }
+
+        BufNode* node = &buffer_list.first.unwrap()->value;
+
+        while (true) {
+            auto base = reinterpret_cast<u64>(node->data);
+            auto current = base + end_index;
+            auto aligned = align_pow2_forward(current, alignment);
+            auto adjusted_index = end_index + (aligned - current);
+            auto new_index = adjusted_index + count;
+
+            if (new_index <= node->capacity) {
+                end_index = new_index;
+                return Slice<T>(
+                    reinterpret_cast<T*>(node->data + adjusted_index),
+                    new_index
+                );
+            }
+            node = &create_node(node->capacity, count + alignment)->value;
+        }
+    }
+
+    template<typename T>
+    Slice<T> alloc(u64 count) {
+        return alloc_aligned<T>(count, alignof(T));
+    }
 
     template<typename T>
     T* create();
@@ -348,12 +401,31 @@ class ArenaAllocator {
     template<typename T>
     Option<Slice<T>> resize(Slice<T> current, u64 new_len);
 
-    template<typename T>
-    void free(T* ptr);
+    void free() {
+        while (buffer_list.first.has_value()) {
+            auto node = buffer_list.pop_first();
+            free_node(node.unwrap());
+        }
+        end_index = 0;
+    }
 
   private:
-    SinglyLinkedList<BufNode>::Node*
-    create_node(u64 prev_len, u64 minimum_size);
+    using BufNode = ArenaAllocator::BufNode;
+    using Node = SinglyLinkedList<BufNode>::Node;
 
-    void free_node(SinglyLinkedList<BufNode>::Node* node);
+    Node* create_node(u64 prev_len, u64 minimum_size) {
+        auto actual_min_size = minimum_size + sizeof(Node);
+        auto big_enough_len = prev_len + actual_min_size;
+        auto len = big_enough_len + big_enough_len / 2;
+        Node* node = static_cast<Node*>(raw_alloc(len));
+        node->value.capacity = len - sizeof(Node);
+        buffer_list.prepend(node);
+        end_index = 0;
+        return node;
+    }
+
+    void free_node(Node* node) {
+        int err = munmap(node, sizeof(Node) + node->value.capacity);
+        assert(err != -1);
+    }
 };
