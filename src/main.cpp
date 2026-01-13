@@ -5,13 +5,11 @@
 int main() {
     ArenaAllocator alloc;
 
-    Slice<u64> slice = alloc.alloc<u64>(1024);
+    Slice<u64> slice = alloc.alloc<u64>(20);
 
-    for (int i = 0; i < slice.len; i++) {
-        slice[i] = i + 1;
-    }
+    alloc.pop(slice);
 
-    std::cout << slice.to_string() << "\n";
+    assert(alloc.end_index == 0);
 
     alloc.free();
 }

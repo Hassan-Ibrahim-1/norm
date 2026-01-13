@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <type_traits>
 
@@ -295,8 +296,7 @@ struct BumpAllocator {
     }
 
     template<typename T>
-    [[nodiscard]]
-    Option<Slice<T>> alloc_aligned(u64 count, u64 alignment) {
+    [[nodiscard]] Option<Slice<T>> alloc_aligned(u64 count, u64 alignment) {
         alignment = std::max<u64>(alignof(T), alignment);
         auto base = reinterpret_cast<u64>(data);
         auto current = base + end_index;
@@ -309,12 +309,11 @@ struct BumpAllocator {
         }
 
         end_index = new_index + size;
-        return Slice(reinterpret_cast<T*>(data + new_index), count);
+        return Slice(static_cast<T*>(data + new_index), count);
     }
 
     template<typename T>
-    [[nodiscard]]
-    Option<Slice<T>> alloc(u64 count) {
+    [[nodiscard]] Option<Slice<T>> alloc(u64 count) {
         return alloc_aligned<T>(count, alignof(T));
     }
 
@@ -396,10 +395,27 @@ class ArenaAllocator {
     }
 
     template<typename T>
-    T* create();
+    void pop_aligned(Slice<T> mem, u64 alignment) {
+        if (buffer_list.first.is_null())
+            return;
+
+        auto len_bytes = mem.len * sizeof(T);
+        auto mem_ptr = reinterpret_cast<u64>(mem.data);
+        auto* cur_buf = &buffer_list.first.unwrap()->value;
+        auto cur_end = reinterpret_cast<u64>(cur_buf->data) + end_index;
+
+        if (cur_end == mem_ptr + len_bytes) {
+            end_index -= len_bytes;
+        }
+    }
 
     template<typename T>
-    Option<Slice<T>> resize(Slice<T> current, u64 new_len);
+    void pop(Slice<T> mem) {
+        pop_aligned<T>(mem, alignof(T));
+    }
+
+    template<typename T>
+    T* create();
 
     void free() {
         while (buffer_list.first.has_value()) {

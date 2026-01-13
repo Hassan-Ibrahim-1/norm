@@ -12,6 +12,7 @@
 Read a bunch about memory management and allocators. then implement. do it
 right.
 
+Investigate having a minimum page size for arena buffers
 
 ### Norm
 
