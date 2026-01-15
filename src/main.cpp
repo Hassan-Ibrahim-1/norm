@@ -1,22 +1,16 @@
-#include <iostream>
+#include <valgrind/valgrind.h>
 
 #include "common.h"
 
 int main() {
     ArenaAllocator alloc;
 
-    Slice<u64> slice = alloc.alloc<u64>(20);
+    alloc.alloc<u64>(20);
+    alloc.alloc<u64>(20);
+    alloc.alloc<u64>(500);
+    alloc.alloc<u64>(750);
 
-    Slice<u64> slice2 = alloc.alloc<u64>(20);
+    assert(alloc.buffer_list.len() == 4);
 
-    auto slice2_index = alloc.end_index;
-    alloc.pop(slice);
-    assert(slice2_index == alloc.end_index);
-
-    alloc.pop(slice2);
-
-    // because new page
-    assert(alloc.end_index == 0);
-
-    alloc.free();
+    alloc.clear();
 }

@@ -1,11 +1,15 @@
 #pragma once
 
 #include <sys/mman.h>
+#include <valgrind/valgrind.h>
+
+#ifdef __linux__
+    #include <valgrind/memcheck.h>
+#endif // __linux__
 
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <string>
 #include <type_traits>
 
@@ -24,7 +28,7 @@ inline bool is_pow2(u64 n) {
 }
 
 inline void* raw_alloc(u64 len) {
-    auto data = mmap(
+    auto ptr = mmap(
         NULL,
         len,
         PROT_READ | PROT_WRITE,
@@ -32,20 +36,30 @@ inline void* raw_alloc(u64 len) {
         -1,
         0
     );
-    assert(data != MAP_FAILED);
-    return data;
+    assert(ptr != MAP_FAILED);
+
+#ifdef __linux__
+    if (RUNNING_ON_VALGRIND) {
+        VALGRIND_MALLOCLIKE_BLOCK(ptr, len, 0, 0);
+    }
+#endif // __linux__
+
+    return ptr;
 }
 
-inline void raw_free(void* data, u64 size) {
-    int err = munmap(data, size);
+inline void raw_free(void* ptr, u64 size) {
+    int err = munmap(ptr, size);
     assert(err != -1);
+
+#ifdef __linux__
+    if (RUNNING_ON_VALGRIND) {
+        VALGRIND_FREELIKE_BLOCK(ptr, size);
+    }
+#endif // __linux__
 }
 
 inline u64 align_pow2_backward(u64 address, u64 alignment) {
     assert(is_pow2(alignment));
-    // 000010000 // example alignment
-    // 000001111 // subtract 1
-    // 111110000 // binary not
     return address & ~(alignment - 1);
 }
 
@@ -225,7 +239,7 @@ struct SinglyLinkedList {
         Option<Node*> next;
         T value;
 
-        Node(T value) : value(value), next() {}
+        Node(T value) : next(), value(value) {}
 
         void insert_after(Node* new_node) {
             new_node->next = next;
@@ -264,6 +278,16 @@ struct SinglyLinkedList {
         Node* f = first.unwrap();
         first = f->next;
         return f;
+    }
+
+    u64 len() {
+        auto it = first;
+        u64 size = 0;
+        while (it.has_value()) {
+            size += 1;
+            it = it.unwrap()->next;
+        }
+        return size;
     }
 };
 
@@ -432,14 +456,67 @@ class ArenaAllocator {
         pop_aligned<T>(mem, alignof(T));
     }
 
+    u64 query_capacity() {
+        u64 size = 0;
+        auto it = buffer_list.first;
+        while (it.has_value()) {
+            auto node = it.unwrap();
+            size += node->value.capacity - sizeof(Node);
+            it = node->next;
+        }
+        return size;
+    }
+
+    // retains capacity
+    void reset() {
+        auto target_capacity = query_capacity();
+        auto total_size = target_capacity + sizeof(Node);
+
+        auto it = buffer_list.first;
+        Option<Node*> maybe_first_node = {};
+        while (it.has_value()) {
+            auto node = it.unwrap();
+            auto next_it = node->next;
+
+            if (next_it.is_null()) {
+                maybe_first_node = node;
+                break;
+            }
+
+            it = next_it;
+        }
+        assert(
+            maybe_first_node.is_null()
+            || maybe_first_node.unwrap()->next.is_null()
+        );
+        end_index = 0;
+        if (maybe_first_node.has_value()) {
+            auto first_node = maybe_first_node.unwrap();
+            buffer_list.first = first_node;
+
+            auto* first_buf_node = &maybe_first_node.unwrap()->value;
+            if (first_buf_node->capacity == total_size) {
+                return;
+            }
+            auto new_ptr = raw_alloc(total_size);
+            free_node(first_node);
+            auto node = static_cast<Node*>(new_ptr);
+            node->value.capacity = total_size;
+            buffer_list.first = node;
+        }
+    }
+
     template<typename T>
     T* create();
 
-    void free() {
-        while (buffer_list.first.has_value()) {
-            auto node = buffer_list.pop_first();
-            free_node(node.unwrap());
+    void clear() {
+        auto it = buffer_list.first;
+        while (it.has_value()) {
+            auto* node = it.unwrap();
+            it = node->next;
+            free_node(node);
         }
+        buffer_list.first = {};
         end_index = 0;
     }
 
@@ -459,7 +536,6 @@ class ArenaAllocator {
     }
 
     void free_node(Node* node) {
-        int err = munmap(node, sizeof(Node) + node->value.capacity);
-        assert(err != -1);
+        raw_free(node, sizeof(Node) + node->value.capacity);
     }
 };
