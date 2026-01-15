@@ -137,8 +137,8 @@ struct Slice {
     T* data;
     u64 len;
 
-    using iterator = T*;
-    using const_iterator = const T*;
+    using Iterator = T*;
+    using ConstIterator = const T*;
 
     Slice() : data(nullptr), len(0) {}
 
@@ -184,27 +184,27 @@ struct Slice {
         return result;
     }
 
-    iterator begin() {
+    Iterator begin() {
         return data;
     }
 
-    iterator end() {
+    Iterator end() {
         return data + len;
     }
 
-    const_iterator begin() const {
+    ConstIterator begin() const {
         return data;
     }
 
-    const_iterator end() const {
+    ConstIterator end() const {
         return data + len;
     }
 
-    const_iterator cbegin() const {
+    ConstIterator cbegin() const {
         return data;
     }
 
-    const_iterator cend() const {
+    ConstIterator cend() const {
         return data + len;
     }
 
@@ -376,16 +376,16 @@ class ArenaAllocator {
             auto current = base + end_index;
             auto aligned = align_pow2_forward(current, alignment);
             auto adjusted_index = end_index + (aligned - current);
-            auto new_index = adjusted_index + count;
+            auto new_end_index = adjusted_index + size;
 
-            if (new_index <= node->capacity) {
-                end_index = new_index;
+            if (new_end_index <= node->capacity) {
+                end_index = new_end_index;
                 return Slice<T>(
                     reinterpret_cast<T*>(node->data + adjusted_index),
-                    new_index
+                    count
                 );
             }
-            node = &create_node(node->capacity, count + alignment)->value;
+            node = &create_node(node->capacity, size + alignment)->value;
         }
     }
 
@@ -396,8 +396,10 @@ class ArenaAllocator {
 
     template<typename T>
     void pop_aligned(Slice<T> mem, u64 alignment) {
-        if (buffer_list.first.is_null())
+        if (buffer_list.first.is_null()) {
+            printf("empty buffer list\n");
             return;
+        }
 
         auto len_bytes = mem.len * sizeof(T);
         auto mem_ptr = reinterpret_cast<u64>(mem.data);
