@@ -15,8 +15,8 @@ int main() {
 
     alloc.pop(slice2);
 
-    assert(alloc.end_index != slice2_index);
-    assert(slice2_index - sizeof(u64) * slice2.len == alloc.end_index);
+    // because new page
+    assert(alloc.end_index == 0);
 
     alloc.free();
 }

@@ -353,6 +353,10 @@ class ArenaAllocator {
         u8 data[];
     };
 
+    struct AllocationHeader {
+        u64 padding;
+    };
+
     ArenaAllocator() {}
 
     SinglyLinkedList<BufNode> buffer_list;
@@ -374,9 +378,18 @@ class ArenaAllocator {
         while (true) {
             auto base = reinterpret_cast<u64>(node->data);
             auto current = base + end_index;
-            auto aligned = align_pow2_forward(current, alignment);
-            auto adjusted_index = end_index + (aligned - current);
+            auto aligned = align_pow2_forward(
+                current + sizeof(AllocationHeader),
+                alignment
+            );
+            u64 padding = aligned - current;
+            auto adjusted_index = end_index + padding;
             auto new_end_index = adjusted_index + size;
+
+            auto* header = reinterpret_cast<AllocationHeader*>(
+                aligned - sizeof(AllocationHeader)
+            );
+            header->padding = padding;
 
             if (new_end_index <= node->capacity) {
                 end_index = new_end_index;
@@ -407,7 +420,10 @@ class ArenaAllocator {
         auto cur_end = reinterpret_cast<u64>(cur_buf->data) + end_index;
 
         if (cur_end == mem_ptr + len_bytes) {
-            end_index -= len_bytes;
+            auto* header = reinterpret_cast<AllocationHeader*>(
+                mem_ptr - sizeof(AllocationHeader)
+            );
+            end_index -= len_bytes + header->padding;
         }
     }
 
