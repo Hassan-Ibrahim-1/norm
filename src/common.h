@@ -1,11 +1,15 @@
 #pragma once
 
 #include <sys/mman.h>
+#include <valgrind/valgrind.h>
+
+#ifdef __linux__
+    #include <valgrind/memcheck.h>
+#endif // __linux__
 
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <string>
 #include <type_traits>
 
@@ -24,7 +28,7 @@ inline bool is_pow2(u64 n) {
 }
 
 inline void* raw_alloc(u64 len) {
-    auto data = mmap(
+    auto ptr = mmap(
         NULL,
         len,
         PROT_READ | PROT_WRITE,
@@ -32,20 +36,30 @@ inline void* raw_alloc(u64 len) {
         -1,
         0
     );
-    assert(data != MAP_FAILED);
-    return data;
+    assert(ptr != MAP_FAILED);
+
+#ifdef __linux__
+    if (RUNNING_ON_VALGRIND) {
+        VALGRIND_MALLOCLIKE_BLOCK(ptr, len, 0, 0);
+    }
+#endif // __linux__
+
+    return ptr;
 }
 
-inline void raw_free(void* data, u64 size) {
-    int err = munmap(data, size);
+inline void raw_free(void* ptr, u64 size) {
+    int err = munmap(ptr, size);
     assert(err != -1);
+
+#ifdef __linux__
+    if (RUNNING_ON_VALGRIND) {
+        VALGRIND_FREELIKE_BLOCK(ptr, size);
+    }
+#endif // __linux__
 }
 
 inline u64 align_pow2_backward(u64 address, u64 alignment) {
     assert(is_pow2(alignment));
-    // 000010000 // example alignment
-    // 000001111 // subtract 1
-    // 111110000 // binary not
     return address & ~(alignment - 1);
 }
 
@@ -137,8 +151,8 @@ struct Slice {
     T* data;
     u64 len;
 
-    using iterator = T*;
-    using const_iterator = const T*;
+    using Iterator = T*;
+    using ConstIterator = const T*;
 
     Slice() : data(nullptr), len(0) {}
 
@@ -184,27 +198,27 @@ struct Slice {
         return result;
     }
 
-    iterator begin() {
+    Iterator begin() {
         return data;
     }
 
-    iterator end() {
+    Iterator end() {
         return data + len;
     }
 
-    const_iterator begin() const {
+    ConstIterator begin() const {
         return data;
     }
 
-    const_iterator end() const {
+    ConstIterator end() const {
         return data + len;
     }
 
-    const_iterator cbegin() const {
+    ConstIterator cbegin() const {
         return data;
     }
 
-    const_iterator cend() const {
+    ConstIterator cend() const {
         return data + len;
     }
 
@@ -225,7 +239,7 @@ struct SinglyLinkedList {
         Option<Node*> next;
         T value;
 
-        Node(T value) : value(value), next() {}
+        Node(T value) : next(), value(value) {}
 
         void insert_after(Node* new_node) {
             new_node->next = next;
@@ -264,6 +278,16 @@ struct SinglyLinkedList {
         Node* f = first.unwrap();
         first = f->next;
         return f;
+    }
+
+    u64 len() {
+        auto it = first;
+        u64 size = 0;
+        while (it.has_value()) {
+            size += 1;
+            it = it.unwrap()->next;
+        }
+        return size;
     }
 };
 
@@ -353,6 +377,10 @@ class ArenaAllocator {
         u8 data[];
     };
 
+    struct AllocationHeader {
+        u64 padding;
+    };
+
     ArenaAllocator() {}
 
     SinglyLinkedList<BufNode> buffer_list;
@@ -374,18 +402,27 @@ class ArenaAllocator {
         while (true) {
             auto base = reinterpret_cast<u64>(node->data);
             auto current = base + end_index;
-            auto aligned = align_pow2_forward(current, alignment);
-            auto adjusted_index = end_index + (aligned - current);
-            auto new_index = adjusted_index + count;
+            auto aligned = align_pow2_forward(
+                current + sizeof(AllocationHeader),
+                alignment
+            );
+            u64 padding = aligned - current;
+            auto adjusted_index = end_index + padding;
+            auto new_end_index = adjusted_index + size;
 
-            if (new_index <= node->capacity) {
-                end_index = new_index;
+            auto* header = reinterpret_cast<AllocationHeader*>(
+                aligned - sizeof(AllocationHeader)
+            );
+            header->padding = padding;
+
+            if (new_end_index <= node->capacity) {
+                end_index = new_end_index;
                 return Slice<T>(
                     reinterpret_cast<T*>(node->data + adjusted_index),
-                    new_index
+                    count
                 );
             }
-            node = &create_node(node->capacity, count + alignment)->value;
+            node = &create_node(node->capacity, size + alignment)->value;
         }
     }
 
@@ -396,8 +433,10 @@ class ArenaAllocator {
 
     template<typename T>
     void pop_aligned(Slice<T> mem, u64 alignment) {
-        if (buffer_list.first.is_null())
+        if (buffer_list.first.is_null()) {
+            printf("empty buffer list\n");
             return;
+        }
 
         auto len_bytes = mem.len * sizeof(T);
         auto mem_ptr = reinterpret_cast<u64>(mem.data);
@@ -405,7 +444,10 @@ class ArenaAllocator {
         auto cur_end = reinterpret_cast<u64>(cur_buf->data) + end_index;
 
         if (cur_end == mem_ptr + len_bytes) {
-            end_index -= len_bytes;
+            auto* header = reinterpret_cast<AllocationHeader*>(
+                mem_ptr - sizeof(AllocationHeader)
+            );
+            end_index -= len_bytes + header->padding;
         }
     }
 
@@ -414,14 +456,67 @@ class ArenaAllocator {
         pop_aligned<T>(mem, alignof(T));
     }
 
+    u64 query_capacity() {
+        u64 size = 0;
+        auto it = buffer_list.first;
+        while (it.has_value()) {
+            auto node = it.unwrap();
+            size += node->value.capacity - sizeof(Node);
+            it = node->next;
+        }
+        return size;
+    }
+
+    // retains capacity
+    void reset() {
+        auto target_capacity = query_capacity();
+        auto total_size = target_capacity + sizeof(Node);
+
+        auto it = buffer_list.first;
+        Option<Node*> maybe_first_node = {};
+        while (it.has_value()) {
+            auto node = it.unwrap();
+            auto next_it = node->next;
+
+            if (next_it.is_null()) {
+                maybe_first_node = node;
+                break;
+            }
+
+            it = next_it;
+        }
+        assert(
+            maybe_first_node.is_null()
+            || maybe_first_node.unwrap()->next.is_null()
+        );
+        end_index = 0;
+        if (maybe_first_node.has_value()) {
+            auto first_node = maybe_first_node.unwrap();
+            buffer_list.first = first_node;
+
+            auto* first_buf_node = &maybe_first_node.unwrap()->value;
+            if (first_buf_node->capacity == total_size) {
+                return;
+            }
+            auto new_ptr = raw_alloc(total_size);
+            free_node(first_node);
+            auto node = static_cast<Node*>(new_ptr);
+            node->value.capacity = total_size;
+            buffer_list.first = node;
+        }
+    }
+
     template<typename T>
     T* create();
 
-    void free() {
-        while (buffer_list.first.has_value()) {
-            auto node = buffer_list.pop_first();
-            free_node(node.unwrap());
+    void clear() {
+        auto it = buffer_list.first;
+        while (it.has_value()) {
+            auto* node = it.unwrap();
+            it = node->next;
+            free_node(node);
         }
+        buffer_list.first = {};
         end_index = 0;
     }
 
@@ -441,7 +536,6 @@ class ArenaAllocator {
     }
 
     void free_node(Node* node) {
-        int err = munmap(node, sizeof(Node) + node->value.capacity);
-        assert(err != -1);
+        raw_free(node, sizeof(Node) + node->value.capacity);
     }
 };

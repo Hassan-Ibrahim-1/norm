@@ -1,16 +1,14 @@
 ### Prereq stuff
 
-** Slice type
-** Result type
-** Option type
-** String type
-* Allocators
-* Testing
-* Dynamic array
-* Hash map (can do this later)
-
-Read a bunch about memory management and allocators. then implement. do it
-right.
+[x] Slice type
+[x] Result type
+[x] Option type
+[x] String type
+[ ] Allocators
+[ ] Testing
+[ ] Dynamic array
+[ ] Hash map (can do this later)
+[ ] Test allocators / containers
 
 Investigate having a minimum page size for arena buffers
 
@@ -52,7 +50,7 @@ index_of := fn (s: string, target: u8) ?int {
             return i
         }
     }
-    return null;
+    return null
 }
 
 ```
@@ -67,9 +65,9 @@ Vec2 := struct {
     x: float,
     y: float,
     
-    // first parameter can have no type and is assigned
-    // to Self, can add pointer syntax
-    new := fn (*mut self, x, y: f32) Self {
+    // just a namespaced function
+    // example call: `Vec2.new(..)`
+    new := fn (x, y: float) Self {
         // variables that have the same name
         // as a field don't need specifier
         // otherwise {x: x, y: y}
