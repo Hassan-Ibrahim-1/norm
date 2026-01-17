@@ -1,5 +1,3 @@
-#include <valgrind/valgrind.h>
-
 #include "common.h"
 
 int main() {

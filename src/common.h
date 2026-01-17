@@ -1,7 +1,6 @@
 #pragma once
 
 #include <sys/mman.h>
-#include <valgrind/valgrind.h>
 
 #ifdef __linux__
     #include <valgrind/memcheck.h>
@@ -538,4 +537,28 @@ class ArenaAllocator {
     void free_node(Node* node) {
         raw_free(node, sizeof(Node) + node->value.capacity);
     }
+};
+
+template<typename T>
+struct ArrayList {
+    Slice<T> items;
+    u64 capacity;
+
+    ArrayList() : items(), capacity(0) {}
+
+    void append(T v) {}
+
+    void append_slice(Slice<T> v) {}
+
+    // makes sure this array can hold at least `capacity`
+    // items if `capacity` is greater than current capacity
+    void reserve(u64 capacity) {}
+
+    void clear_retaining_capacity() {}
+
+    void swap_remove(u64 i) {}
+
+    void ordered_remove(u64 i) {}
+
+    void free() {}
 };
