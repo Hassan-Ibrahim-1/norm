@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const assert = std.debug.assert;
+const Lexer = @import("Lexer.zig");
 const Io = std.Io;
 
 pub fn main() !void {
@@ -55,4 +56,9 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
         const line = line_buf[0..len];
         _ = line; // autofix
     }
+}
+
+test {
+    _ = Lexer;
+    std.testing.refAllDeclsRecursive(@This());
 }

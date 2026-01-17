@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const Lexer = @This();
 
@@ -77,7 +78,69 @@ pub fn init(source: []const u8) Lexer {
         .source = source,
         .start = 0,
         .end = 0,
+        .line = 0,
     };
 }
 
-pub fn scanToken() Error!Token {}
+pub fn scanToken(self: *Lexer) Error!Token {
+    _ = self; // autofix
+    return eofToken(0);
+}
+
+fn eofToken(line: u32) Token {
+    return .{
+        .type = .eof,
+        .line = line,
+        .lexeme = "",
+    };
+}
+
+const testing = std.testing;
+
+fn testToken(lexeme: []const u8, typ: Token.Type) Token {
+    return Token{
+        .lexeme = lexeme,
+        .type = typ,
+        .line = 0,
+    };
+}
+
+fn testScanTokens(
+    gpa: Allocator,
+    source: []const u8,
+) (Allocator.Error || Error)![]const Token {
+    var l = Lexer.init(source);
+    var tokens: std.ArrayList(Token) = .empty;
+    errdefer tokens.deinit(gpa);
+
+    while (true) {
+        const token = try l.scanToken();
+        if (token.type == .eof) {
+            return tokens.toOwnedSlice(gpa);
+        }
+        try tokens.append(gpa, token);
+    }
+}
+
+test "simple" {
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const Token,
+    } = &.{
+        .{
+            .source = "+",
+            .expected = &.{
+                testToken("+", .plus),
+            },
+        },
+    };
+
+    const gpa = std.testing.allocator;
+
+    for (tests) |t| {
+        const tokens = try testScanTokens(gpa, t.source);
+        defer gpa.free(tokens);
+
+        try testing.expectEqualSlices(Token, t.expected, tokens);
+    }
+}
