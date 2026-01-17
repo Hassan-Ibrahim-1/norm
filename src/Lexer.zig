@@ -259,7 +259,13 @@ fn expectTokensEqual(expected: []const Token, actual: []const Token) !void {
 }
 
 fn dumpTokens(prefix: []const u8, tokens: []const Token) void {
-    std.debug.print("{s}: {any}\n", .{ prefix, tokens });
+    std.debug.print("{s} = .{{\n", .{prefix});
+
+    for (0.., tokens) |i, t| {
+        std.debug.print("    [{}] = {f},\n", .{ i, t });
+    }
+
+    std.debug.print("}}\n", .{});
 }
 
 test "simple" {
@@ -270,7 +276,7 @@ test "simple" {
         .{
             .source = "+ += - -= * *= / /= : := ! != > >= < <= = == =>",
             .expected = &.{
-                testToken("+", .plus),
+                // testToken("+", .plus),
                 testToken("+=", .plus_equal),
                 testToken("-", .minus),
                 testToken("-=", .minus_equal),
