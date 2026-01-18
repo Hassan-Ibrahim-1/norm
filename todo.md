@@ -1,5 +1,11 @@
 # TODO
 
+[x] Lexer
+[ ] Parser (astgen)
+[ ] Semantic anaylsis + type checking
+[ ] Codegen + optimization
+[ ] Virtual machine + garbage collector
+
 ### Norm
 
 Type system, type inference, closures, go-like import system,
