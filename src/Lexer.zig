@@ -60,6 +60,7 @@ pub const Token = struct {
         import,
         _switch,
         _enum,
+        range,
 
         _error,
         eof,
@@ -120,10 +121,10 @@ fn tokenOptionalEqual(self: *Lexer, c: u8) Token {
 
 pub fn scanToken(self: *Lexer) Error!Token {
     self.skipWhitespace();
+    self.start = self.current;
 
     if (self.isAtEnd()) return self.createToken(.eof);
 
-    self.start = self.current;
     const c = self.next();
 
     switch (c) {
@@ -146,8 +147,141 @@ pub fn scanToken(self: *Lexer) Error!Token {
             return self.createToken(.equal);
         },
 
-        else => @panic("todo"),
+        '"' => return self.string(),
+
+        else => {
+            if (isDigit(c)) {
+                return self.number();
+            }
+            if (isAlpha(c)) {
+                return self.identifier();
+            }
+            std.debug.print("char: {}", .{c});
+            return self.errorToken("Unexpected character.");
+        },
     }
+}
+
+fn string(self: *Lexer) Token {
+    while (!self.isAtEnd() and self.peek() != '"') {
+        if (self.peek() == '\n') self.line += 1;
+        _ = self.next();
+    }
+
+    if (self.isAtEnd()) return self.errorToken("Unterminated string");
+
+    // consume the '"'
+    _ = self.next();
+    return self.createToken(.string);
+}
+
+fn number(self: *Lexer) Token {
+    while (!self.isAtEnd() and isDigit(self.peek())) _ = self.next();
+
+    if (!self.isAtEnd() and self.peek() == '.' and isDigit(self.peekNext())) {
+        _ = self.next();
+
+        while (isDigit(self.peek())) _ = self.next();
+    }
+
+    return self.createToken(.number);
+}
+
+fn identifier(self: *Lexer) Token {
+    while (!self.isAtEnd() and (isAlpha(self.peek()) or isDigit(self.peek()))) {
+        _ = self.next();
+    }
+    return self.createToken(self.identifierType());
+}
+
+fn identifierType(self: *Lexer) Token.Type {
+    return switch (self.source[self.start]) {
+        'a' => self.checkKeyword(1, "nd", ._and),
+        'c' => self.checkKeyword(1, "truct", ._struct),
+        'n' => self.checkKeyword(1, "il", .nil),
+        'o' => self.checkKeyword(1, "r", ._or),
+        'm' => self.checkKeyword(1, "ut", .mut),
+        's' => self.checkKeyword(1, "witch", ._switch),
+
+        'e' => if (self.current > self.start)
+            switch (self.source[self.start + 1]) {
+                'l' => self.checkKeyword(2, "se", ._else),
+                'n' => self.checkKeyword(2, "um", ._enum),
+                else => .identifier,
+            }
+        else
+            .identifier,
+
+        'r' => if (self.current > self.start)
+            switch (self.source[self.start + 1]) {
+                'e' => self.checkKeyword(2, "turn", ._return),
+                'a' => self.checkKeyword(2, "nge", .range),
+                else => .identifier,
+            }
+        else
+            .identifier,
+
+        'i' => if (self.current > self.start)
+            switch (self.source[self.start + 1]) {
+                'f' => ._if,
+                'm' => self.checkKeyword(2, "port", .import),
+                else => .identifier,
+            }
+        else
+            .identifier,
+
+        'f' => if (self.current > self.start)
+            switch (self.source[self.start + 1]) {
+                'a' => self.checkKeyword(2, "lse", ._false),
+                'o' => self.checkKeyword(2, "r", ._for),
+                'n' => ._fn,
+                else => .identifier,
+            }
+        else
+            .identifier,
+
+        't' => if (self.current > self.start and self.source[self.start + 1] == 'r')
+            switch (self.source[self.start + 2]) {
+                'u' => self.checkKeyword(3, "e", ._true),
+                'y' => ._try,
+                else => .identifier,
+            }
+        else
+            .identifier,
+
+        else => .identifier,
+    };
+}
+
+fn checkKeyword(
+    self: *Lexer,
+    start: usize,
+    rest: []const u8,
+    typ: Token.Type,
+) Token.Type {
+    const current = self.source[start + self.start .. self.current];
+    if (std.mem.eql(u8, rest, current)) {
+        return typ;
+    }
+    return .identifier;
+}
+
+fn isDigit(c: u8) bool {
+    return c >= '0' and c <= '9';
+}
+
+fn isAlpha(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or
+        (c >= 'A' and c <= 'Z') or
+        c == '_';
+}
+
+fn errorToken(self: *Lexer, msg: []const u8) Token {
+    return Token{
+        .type = ._error,
+        .lexeme = msg,
+        .line = self.line,
+    };
 }
 
 fn match(self: *Lexer, c: u8) bool {
@@ -224,10 +358,10 @@ fn testScanTokens(
 
     while (true) {
         const token = try l.scanToken();
+        try tokens.append(gpa, token);
         if (token.type == .eof) {
             return tokens.toOwnedSlice(gpa);
         }
-        try tokens.append(gpa, token);
     }
 }
 
@@ -276,7 +410,7 @@ test "simple" {
         .{
             .source = "+ += - -= * *= / /= : := ! != > >= < <= = == =>",
             .expected = &.{
-                // testToken("+", .plus),
+                testToken("+", .plus),
                 testToken("+=", .plus_equal),
                 testToken("-", .minus),
                 testToken("-=", .minus_equal),
@@ -295,6 +429,7 @@ test "simple" {
                 testToken("=", .equal),
                 testToken("==", .equal_equal),
                 testToken("=>", .equal_greater),
+                testToken("", .eof),
             },
         },
     };
@@ -302,6 +437,132 @@ test "simple" {
     const gpa = std.testing.allocator;
 
     for (tests) |t| {
+        const tokens = try testScanTokens(gpa, t.source);
+        defer gpa.free(tokens);
+
+        try expectTokensEqual(t.expected, tokens);
+    }
+}
+
+test "more tokens" {
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const Token,
+    } = &.{
+        .{
+            .source = "2 + 2",
+            .expected = &.{
+                testToken("2", .number),
+                testToken("+", .plus),
+                testToken("2", .number),
+                testToken("", .eof),
+            },
+        },
+
+        // Parentheses and multiplication
+        .{
+            .source = "(1 * 3)",
+            .expected = &.{
+                testToken("(", .left_paren),
+                testToken("1", .number),
+                testToken("*", .star),
+                testToken("3", .number),
+                testToken(")", .right_paren),
+                testToken("", .eof),
+            },
+        },
+
+        // Variable declaration
+        .{
+            .source = "x := 10",
+            .expected = &.{
+                testToken("x", .identifier),
+                testToken(":=", .colon_equal),
+                testToken("10", .number),
+                testToken("", .eof),
+            },
+        },
+
+        // Comparison
+        .{
+            .source = "a >= b",
+            .expected = &.{
+                testToken("a", .identifier),
+                testToken(">=", .greater_equal),
+                testToken("b", .identifier),
+                testToken("", .eof),
+            },
+        },
+
+        // Logical operators
+        .{
+            .source = "true and false",
+            .expected = &.{
+                testToken("true", ._true),
+                testToken("and", ._and),
+                testToken("false", ._false),
+                testToken("", .eof),
+            },
+        },
+
+        .{
+            .source = "for i < 5",
+            .expected = &.{
+                testToken("for", ._for),
+                testToken("i", .identifier),
+                testToken("<", .less),
+                testToken("5", .number),
+                testToken("", .eof),
+            },
+        },
+
+        // String literal
+        .{
+            .source = "\"hello\"",
+            .expected = &.{
+                testToken("\"hello\"", .string),
+                testToken("", .eof),
+            },
+        },
+
+        // Function call
+        .{
+            .source = "some_func(x)",
+            .expected = &.{
+                testToken("some_func", .identifier),
+                testToken("(", .left_paren),
+                testToken("x", .identifier),
+                testToken(")", .right_paren),
+                testToken("", .eof),
+            },
+        },
+        .{
+            .source = "for i := range 10 { io.println(i); }",
+            .expected = &.{
+                testToken("for", ._for),
+                testToken("i", .identifier),
+                testToken(":=", .colon_equal),
+                testToken("range", .range),
+                testToken("10", .number),
+                testToken("{", .left_brace),
+                testToken("io", .identifier),
+                testToken(".", .dot),
+                testToken("println", .identifier),
+                testToken("(", .left_paren),
+                testToken("i", .identifier),
+                testToken(")", .right_paren),
+                testToken(";", .semicolon),
+                testToken("}", .right_brace),
+                testToken("", .eof),
+            },
+        },
+    };
+
+    const gpa = std.testing.allocator;
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source = \"{s}\"\n\n", .{t.source});
+
         const tokens = try testScanTokens(gpa, t.source);
         defer gpa.free(tokens);
 
