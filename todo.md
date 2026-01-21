@@ -1,17 +1,12 @@
-### Prereq stuff
-
-[x] Slice type
-[x] Result type
-[x] Option type
-[x] String type
-[ ] Fix valgrind invalid memory access.
-[ ] Allocators
-[ ] Testing
-[ ] Dynamic array
-[ ] Hash map (can do this later)
-[ ] Test allocators / containers
+# TODO
 
 Investigate having a minimum page size for arena buffers
+=======
+[x] Lexer
+[ ] Parser (astgen)
+[ ] Semantic anaylsis + type checking
+[ ] Codegen + optimization
+[ ] Virtual machine + garbage collector
 
 ### Norm
 
@@ -51,7 +46,7 @@ index_of := fn (s: string, target: u8) ?int {
             return i
         }
     }
-    return null
+    return nil
 }
 
 ```
@@ -105,29 +100,3 @@ var_args := fn(fmt: string, x: any...) {
 }
 
 ```
-
-
-### Arena Allocator implementation
-
-Linked list of buffers. If current buf gets full allocate a new one and start
-using that.
-
-How does alignment play into this?
-
-Can only free the top of a buffer (pop).
-
-Can allocate any type.
-
-### Memory Pool implementation
-
-Wraps an arena allocator but only allocates for one type.
-
-When a type is 'freed', add it to a linked list. When allocating a new object
-check that linked list first and return that address.
-
-
-What should my base allocator be? Just a simple page allocator? Maybe if I abstract
-over this I can add the same memory checks that zig has. Have a really fast allocator
-for release builds and a slower allocator with checks for debugging.
-
-Maybe there's a better c++ specific way of doing those checks though.
