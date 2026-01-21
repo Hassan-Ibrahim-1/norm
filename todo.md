@@ -4,6 +4,7 @@
 [x] Result type
 [x] Option type
 [x] String type
+[ ] Fix valgrind invalid memory access.
 [ ] Allocators
 [ ] Testing
 [ ] Dynamic array
