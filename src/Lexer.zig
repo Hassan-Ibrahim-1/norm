@@ -119,7 +119,7 @@ fn tokenOptionalEqual(self: *Lexer, c: u8) Token {
     unreachable;
 }
 
-pub fn scanToken(self: *Lexer) Error!Token {
+fn scanToken(self: *Lexer) Error!Token {
     self.skipWhitespace();
     self.start = self.current;
 
@@ -159,6 +159,22 @@ pub fn scanToken(self: *Lexer) Error!Token {
             std.debug.print("char: {}", .{c});
             return self.errorToken("Unexpected character.");
         },
+    }
+}
+
+fn scanTokens(
+    self: *Lexer,
+    gpa: Allocator,
+) (Allocator.Error || Error)![]const Token {
+    var tokens: std.ArrayList(Token) = .empty;
+    errdefer tokens.deinit(gpa);
+
+    while (true) {
+        const token = try self.scanToken();
+        try tokens.append(gpa, token);
+        if (token.type == .eof) {
+            return tokens.toOwnedSlice(gpa);
+        }
     }
 }
 
@@ -348,23 +364,6 @@ fn testToken(lexeme: []const u8, typ: Token.Type) Token {
     };
 }
 
-fn testScanTokens(
-    gpa: Allocator,
-    source: []const u8,
-) (Allocator.Error || Error)![]const Token {
-    var l = Lexer.init(source);
-    var tokens: std.ArrayList(Token) = .empty;
-    errdefer tokens.deinit(gpa);
-
-    while (true) {
-        const token = try l.scanToken();
-        try tokens.append(gpa, token);
-        if (token.type == .eof) {
-            return tokens.toOwnedSlice(gpa);
-        }
-    }
-}
-
 fn expectTokenEqual(expected: Token, actual: Token) !void {
     errdefer std.debug.print(
         "Unequal tokens:\n=====================\nExpected = {f}\n=====================\nGot = {f}\n\n",
@@ -400,6 +399,11 @@ fn dumpTokens(prefix: []const u8, tokens: []const Token) void {
     }
 
     std.debug.print("}}\n", .{});
+}
+
+fn testScanTokens(gpa: Allocator, source: []const u8) (Allocator.Error || Error)![]const Token {
+    var l = Lexer.init(source);
+    return l.scanTokens(gpa);
 }
 
 test "simple" {

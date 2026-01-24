@@ -11,6 +11,14 @@ Investigate having a minimum page size for arena buffers
 Produce a tree that just parses given types (doesn't infer yet), expressions,
 statements, ...
 
+### Now
+
+[ ] Parse literals, arithmetic expressions
+[ ] Emit opcode for a basic AST
+[ ] Setup a VM to run that opcode
+
+Think about error reporting alongside all of this as well
+
 ### Norm
 
 Type system, type inference, closures, go-like import system,
