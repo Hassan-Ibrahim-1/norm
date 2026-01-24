@@ -8,6 +8,9 @@ Investigate having a minimum page size for arena buffers
 [ ] Codegen + optimization
 [ ] Virtual machine + garbage collector
 
+Produce a tree that just parses given types (doesn't infer yet), expressions,
+statements, ...
+
 ### Norm
 
 Type system, type inference, closures, go-like import system,
