@@ -70,16 +70,12 @@ pub const Token = struct {
     line: u32,
     type: Type,
 
-    pub fn format(self: Token, w: *std.Io.Writer) std.Io.Writer.Error!void {
+    pub fn format(t: Token, w: *std.Io.Writer) std.Io.Writer.Error!void {
         try w.print(
             ".{{ .lexeme = \"{s}\", .line = {}, .type = {t}}}",
-            .{ self.lexeme, self.line, self.type },
+            .{ t.lexeme, t.line, t.type },
         );
     }
-};
-
-pub const Error = error{
-    UnrecognizedCharacter,
 };
 
 pub fn init(source: []const u8) Lexer {
@@ -91,7 +87,7 @@ pub fn init(source: []const u8) Lexer {
     };
 }
 
-fn tokenOptionalEqual(self: *Lexer, c: u8) Token {
+fn tokenOptionalEqual(l: *Lexer, c: u8) Token {
     const table: []const struct {
         char: u8,
         single: Token.Type,
@@ -109,68 +105,64 @@ fn tokenOptionalEqual(self: *Lexer, c: u8) Token {
 
     for (table) |entry| {
         if (entry.char == c) {
-            if (self.match('=')) {
-                return self.createToken(entry.equal);
+            if (l.match('=')) {
+                return l.createToken(entry.equal);
             }
-            return self.createToken(entry.single);
+            return l.createToken(entry.single);
         }
     }
 
     unreachable;
 }
 
-fn scanToken(self: *Lexer) Error!Token {
-    self.skipWhitespace();
-    self.start = self.current;
+pub fn scanToken(l: *Lexer) Token {
+    l.skipWhitespace();
+    l.start = l.current;
 
-    if (self.isAtEnd()) return self.createToken(.eof);
+    if (l.isAtEnd()) return l.createToken(.eof);
 
-    const c = self.next();
+    const c = l.next();
 
     switch (c) {
-        '(' => return self.createToken(.left_paren),
-        ')' => return self.createToken(.right_paren),
-        '{' => return self.createToken(.left_brace),
-        '}' => return self.createToken(.right_brace),
-        ';' => return self.createToken(.semicolon),
-        ',' => return self.createToken(.comma),
-        '.' => return self.createToken(.dot),
+        '(' => return l.createToken(.left_paren),
+        ')' => return l.createToken(.right_paren),
+        '{' => return l.createToken(.left_brace),
+        '}' => return l.createToken(.right_brace),
+        ';' => return l.createToken(.semicolon),
+        ',' => return l.createToken(.comma),
+        '.' => return l.createToken(.dot),
 
-        '-', '+', ':', '/', '*', '!', '>', '<' => return self.tokenOptionalEqual(c),
+        '-', '+', ':', '/', '*', '!', '>', '<' => return l.tokenOptionalEqual(c),
 
         '=' => {
-            if (self.match('=')) {
-                return self.createToken(.equal_equal);
-            } else if (self.match('>')) {
-                return self.createToken(.equal_greater);
+            if (l.match('=')) {
+                return l.createToken(.equal_equal);
+            } else if (l.match('>')) {
+                return l.createToken(.equal_greater);
             }
-            return self.createToken(.equal);
+            return l.createToken(.equal);
         },
 
-        '"' => return self.string(),
+        '"' => return l.string(),
 
         else => {
             if (isDigit(c)) {
-                return self.number();
+                return l.number();
             }
             if (isAlpha(c)) {
-                return self.identifier();
+                return l.identifier();
             }
-            std.debug.print("char: {}", .{c});
-            return self.errorToken("Unexpected character.");
+            return l.errorToken("Unexpected character.");
         },
     }
 }
 
-fn scanTokens(
-    self: *Lexer,
-    gpa: Allocator,
-) (Allocator.Error || Error)![]const Token {
+fn scanTokens(l: *Lexer, gpa: Allocator) Allocator.Error![]Token {
     var tokens: std.ArrayList(Token) = .empty;
     errdefer tokens.deinit(gpa);
 
     while (true) {
-        const token = try self.scanToken();
+        const token = l.scanToken();
         try tokens.append(gpa, token);
         if (token.type == .eof) {
             return tokens.toOwnedSlice(gpa);
@@ -178,87 +170,87 @@ fn scanTokens(
     }
 }
 
-fn string(self: *Lexer) Token {
-    while (!self.isAtEnd() and self.peek() != '"') {
-        if (self.peek() == '\n') self.line += 1;
-        _ = self.next();
+fn string(l: *Lexer) Token {
+    while (!l.isAtEnd() and l.peek() != '"') {
+        if (l.peek() == '\n') l.line += 1;
+        _ = l.next();
     }
 
-    if (self.isAtEnd()) return self.errorToken("Unterminated string");
+    if (l.isAtEnd()) return l.errorToken("Unterminated string");
 
     // consume the '"'
-    _ = self.next();
-    return self.createToken(.string);
+    _ = l.next();
+    return l.createToken(.string);
 }
 
-fn number(self: *Lexer) Token {
-    while (!self.isAtEnd() and isDigit(self.peek())) _ = self.next();
+fn number(l: *Lexer) Token {
+    while (!l.isAtEnd() and isDigit(l.peek())) _ = l.next();
 
-    if (!self.isAtEnd() and self.peek() == '.' and isDigit(self.peekNext())) {
-        _ = self.next();
+    if (!l.isAtEnd() and l.peek() == '.' and isDigit(l.peekNext())) {
+        _ = l.next();
 
-        while (isDigit(self.peek())) _ = self.next();
+        while (isDigit(l.peek())) _ = l.next();
     }
 
-    return self.createToken(.number);
+    return l.createToken(.number);
 }
 
-fn identifier(self: *Lexer) Token {
-    while (!self.isAtEnd() and (isAlpha(self.peek()) or isDigit(self.peek()))) {
-        _ = self.next();
+fn identifier(l: *Lexer) Token {
+    while (!l.isAtEnd() and (isAlpha(l.peek()) or isDigit(l.peek()))) {
+        _ = l.next();
     }
-    return self.createToken(self.identifierType());
+    return l.createToken(l.identifierType());
 }
 
-fn identifierType(self: *Lexer) Token.Type {
-    return switch (self.source[self.start]) {
-        'a' => self.checkKeyword(1, "nd", ._and),
-        'c' => self.checkKeyword(1, "truct", ._struct),
-        'n' => self.checkKeyword(1, "il", .nil),
-        'o' => self.checkKeyword(1, "r", ._or),
-        'm' => self.checkKeyword(1, "ut", .mut),
-        's' => self.checkKeyword(1, "witch", ._switch),
+fn identifierType(l: *Lexer) Token.Type {
+    return switch (l.source[l.start]) {
+        'a' => l.checkKeyword(1, "nd", ._and),
+        'c' => l.checkKeyword(1, "truct", ._struct),
+        'n' => l.checkKeyword(1, "il", .nil),
+        'o' => l.checkKeyword(1, "r", ._or),
+        'm' => l.checkKeyword(1, "ut", .mut),
+        's' => l.checkKeyword(1, "witch", ._switch),
 
-        'e' => if (self.current > self.start)
-            switch (self.source[self.start + 1]) {
-                'l' => self.checkKeyword(2, "se", ._else),
-                'n' => self.checkKeyword(2, "um", ._enum),
+        'e' => if (l.current > l.start)
+            switch (l.source[l.start + 1]) {
+                'l' => l.checkKeyword(2, "se", ._else),
+                'n' => l.checkKeyword(2, "um", ._enum),
                 else => .identifier,
             }
         else
             .identifier,
 
-        'r' => if (self.current > self.start)
-            switch (self.source[self.start + 1]) {
-                'e' => self.checkKeyword(2, "turn", ._return),
-                'a' => self.checkKeyword(2, "nge", .range),
+        'r' => if (l.current > l.start)
+            switch (l.source[l.start + 1]) {
+                'e' => l.checkKeyword(2, "turn", ._return),
+                'a' => l.checkKeyword(2, "nge", .range),
                 else => .identifier,
             }
         else
             .identifier,
 
-        'i' => if (self.current > self.start)
-            switch (self.source[self.start + 1]) {
+        'i' => if (l.current > l.start)
+            switch (l.source[l.start + 1]) {
                 'f' => ._if,
-                'm' => self.checkKeyword(2, "port", .import),
+                'm' => l.checkKeyword(2, "port", .import),
                 else => .identifier,
             }
         else
             .identifier,
 
-        'f' => if (self.current > self.start)
-            switch (self.source[self.start + 1]) {
-                'a' => self.checkKeyword(2, "lse", ._false),
-                'o' => self.checkKeyword(2, "r", ._for),
+        'f' => if (l.current > l.start)
+            switch (l.source[l.start + 1]) {
+                'a' => l.checkKeyword(2, "lse", ._false),
+                'o' => l.checkKeyword(2, "r", ._for),
                 'n' => ._fn,
                 else => .identifier,
             }
         else
             .identifier,
 
-        't' => if (self.current > self.start and self.source[self.start + 1] == 'r')
-            switch (self.source[self.start + 2]) {
-                'u' => self.checkKeyword(3, "e", ._true),
+        't' => if (l.current > l.start and l.source[l.start + 1] == 'r')
+            switch (l.source[l.start + 2]) {
+                'u' => l.checkKeyword(3, "e", ._true),
                 'y' => ._try,
                 else => .identifier,
             }
@@ -270,12 +262,12 @@ fn identifierType(self: *Lexer) Token.Type {
 }
 
 fn checkKeyword(
-    self: *Lexer,
+    l: *Lexer,
     start: usize,
     rest: []const u8,
     typ: Token.Type,
 ) Token.Type {
-    const current = self.source[start + self.start .. self.current];
+    const current = l.source[start + l.start .. l.current];
     if (std.mem.eql(u8, rest, current)) {
         return typ;
     }
@@ -292,39 +284,40 @@ fn isAlpha(c: u8) bool {
         c == '_';
 }
 
-fn errorToken(self: *Lexer, msg: []const u8) Token {
-    return Token{
+fn errorToken(l: *Lexer, msg: []const u8) Token {
+    return .{
         .type = ._error,
         .lexeme = msg,
-        .line = self.line,
+        .line = l.line,
     };
 }
 
-fn match(self: *Lexer, c: u8) bool {
-    if (!self.isAtEnd() and self.peek() == c) {
-        _ = self.next();
+fn match(l: *Lexer, c: u8) bool {
+    if (!l.isAtEnd() and l.peek() == c) {
+        _ = l.next();
         return true;
     }
     return false;
 }
 
-fn next(self: *Lexer) u8 {
-    defer self.current += 1;
-    return self.source[self.current];
+fn next(l: *Lexer) u8 {
+    defer l.current += 1;
+    return l.source[l.current];
 }
 
-fn skipWhitespace(self: *Lexer) void {
-    while (!self.isAtEnd()) {
-        switch (self.peek()) {
-            ' ', '\t', '\r' => _ = self.next(),
+fn skipWhitespace(l: *Lexer) void {
+    while (!l.isAtEnd()) {
+        switch (l.peek()) {
+            ' ', '\t', '\r' => _ = l.next(),
             '\n' => {
-                self.line += 1;
-                _ = self.next();
+                l.line += 1;
+                _ = l.next();
             },
             '/' => {
-                if (self.peekNext() == '/') {
-                    while (self.peek() != '\n' and !self.isAtEnd()) {
-                        _ = self.next();
+                // ignore comments
+                if (l.peekNext() == '/') {
+                    while (!l.isAtEnd() and l.peek() != '\n') {
+                        _ = l.next();
                     }
                 } else return;
             },
@@ -334,27 +327,35 @@ fn skipWhitespace(self: *Lexer) void {
     }
 }
 
-fn peek(self: *Lexer) u8 {
-    return self.source[self.current];
+fn peek(l: *Lexer) u8 {
+    return l.source[l.current];
 }
 
-fn peekNext(self: *Lexer) u8 {
-    return self.source[self.current + 1];
+fn peekNext(l: *Lexer) u8 {
+    return l.source[l.current + 1];
 }
 
-fn isAtEnd(self: *Lexer) bool {
-    return self.current == self.source.len;
+fn isAtEnd(l: *Lexer) bool {
+    return l.current == l.source.len;
 }
 
-fn createToken(self: *Lexer, typ: Token.Type) Token {
+fn createToken(l: *Lexer, typ: Token.Type) Token {
     return .{
         .type = typ,
-        .line = self.line,
-        .lexeme = self.source[self.start..self.current],
+        .line = l.line,
+        .lexeme = l.source[l.start..l.current],
     };
 }
 
 const testing = std.testing;
+
+fn testTokenLine(lexeme: []const u8, typ: Token.Type, line: u32) Token {
+    return Token{
+        .lexeme = lexeme,
+        .type = typ,
+        .line = line,
+    };
+}
 
 fn testToken(lexeme: []const u8, typ: Token.Type) Token {
     return Token{
@@ -401,7 +402,7 @@ fn dumpTokens(prefix: []const u8, tokens: []const Token) void {
     std.debug.print("}}\n", .{});
 }
 
-fn testScanTokens(gpa: Allocator, source: []const u8) (Allocator.Error || Error)![]const Token {
+fn testScanTokens(gpa: Allocator, source: []const u8) Allocator.Error![]Token {
     var l = Lexer.init(source);
     return l.scanTokens(gpa);
 }
@@ -558,6 +559,34 @@ test "more tokens" {
                 testToken(";", .semicolon),
                 testToken("}", .right_brace),
                 testToken("", .eof),
+            },
+        },
+    };
+
+    const gpa = std.testing.allocator;
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source = \"{s}\"\n\n", .{t.source});
+
+        const tokens = try testScanTokens(gpa, t.source);
+        defer gpa.free(tokens);
+
+        try expectTokensEqual(t.expected, tokens);
+    }
+}
+
+test "comments" {
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const Token,
+    } = &.{
+        .{
+            .source = "// This should not count at all\n2 + 2 // Neither should this",
+            .expected = &.{
+                testTokenLine("2", .number, 1),
+                testTokenLine("+", .plus, 1),
+                testTokenLine("2", .number, 1),
+                testTokenLine("", .eof, 1),
             },
         },
     };
