@@ -41,26 +41,27 @@ pub const Token = struct {
         // literals.
         identifier,
         string,
-        number,
+        number_float,
+        number_int,
 
         // keywords.
-        _and,
-        _struct,
-        _else,
-        _false,
-        _for,
-        _fn,
-        _if,
-        _try,
-        nil,
-        _or,
-        _return,
-        _true,
-        mut,
-        import,
-        _switch,
-        _enum,
-        range,
+        kw_and,
+        kw_struct,
+        kw_else,
+        kw_false,
+        kw_for,
+        kw_fn,
+        kw_if,
+        kw_try,
+        kw_nil,
+        kw_or,
+        kw_return,
+        kw_true,
+        kw_mut,
+        kw_import,
+        kw_switch,
+        kw_enum,
+        kw_range,
 
         _error,
         eof,
@@ -83,7 +84,7 @@ pub fn init(source: []const u8) Lexer {
         .source = source,
         .start = 0,
         .current = 0,
-        .line = 0,
+        .line = 1,
     };
 }
 
@@ -189,10 +190,10 @@ fn number(l: *Lexer) Token {
     if (!l.isAtEnd() and l.peek() == '.' and isDigit(l.peekNext())) {
         _ = l.next();
 
-        while (isDigit(l.peek())) _ = l.next();
+        while (!l.isAtEnd() and isDigit(l.peek())) _ = l.next();
+        return l.createToken(.number_float);
     }
-
-    return l.createToken(.number);
+    return l.createToken(.number_int);
 }
 
 fn identifier(l: *Lexer) Token {
@@ -204,17 +205,17 @@ fn identifier(l: *Lexer) Token {
 
 fn identifierType(l: *Lexer) Token.Type {
     return switch (l.source[l.start]) {
-        'a' => l.checkKeyword(1, "nd", ._and),
-        'c' => l.checkKeyword(1, "truct", ._struct),
-        'n' => l.checkKeyword(1, "il", .nil),
-        'o' => l.checkKeyword(1, "r", ._or),
-        'm' => l.checkKeyword(1, "ut", .mut),
-        's' => l.checkKeyword(1, "witch", ._switch),
+        'a' => l.checkKeyword(1, "nd", .kw_and),
+        'c' => l.checkKeyword(1, "truct", .kw_struct),
+        'n' => l.checkKeyword(1, "il", .kw_nil),
+        'o' => l.checkKeyword(1, "r", .kw_or),
+        'm' => l.checkKeyword(1, "ut", .kw_mut),
+        's' => l.checkKeyword(1, "witch", .kw_switch),
 
         'e' => if (l.current > l.start)
             switch (l.source[l.start + 1]) {
-                'l' => l.checkKeyword(2, "se", ._else),
-                'n' => l.checkKeyword(2, "um", ._enum),
+                'l' => l.checkKeyword(2, "se", .kw_else),
+                'n' => l.checkKeyword(2, "um", .kw_enum),
                 else => .identifier,
             }
         else
@@ -222,8 +223,8 @@ fn identifierType(l: *Lexer) Token.Type {
 
         'r' => if (l.current > l.start)
             switch (l.source[l.start + 1]) {
-                'e' => l.checkKeyword(2, "turn", ._return),
-                'a' => l.checkKeyword(2, "nge", .range),
+                'e' => l.checkKeyword(2, "turn", .kw_return),
+                'a' => l.checkKeyword(2, "nge", .kw_range),
                 else => .identifier,
             }
         else
@@ -231,8 +232,8 @@ fn identifierType(l: *Lexer) Token.Type {
 
         'i' => if (l.current > l.start)
             switch (l.source[l.start + 1]) {
-                'f' => ._if,
-                'm' => l.checkKeyword(2, "port", .import),
+                'f' => .kw_if,
+                'm' => l.checkKeyword(2, "port", .kw_import),
                 else => .identifier,
             }
         else
@@ -240,9 +241,9 @@ fn identifierType(l: *Lexer) Token.Type {
 
         'f' => if (l.current > l.start)
             switch (l.source[l.start + 1]) {
-                'a' => l.checkKeyword(2, "lse", ._false),
-                'o' => l.checkKeyword(2, "r", ._for),
-                'n' => ._fn,
+                'a' => l.checkKeyword(2, "lse", .kw_false),
+                'o' => l.checkKeyword(2, "r", .kw_for),
+                'n' => .kw_fn,
                 else => .identifier,
             }
         else
@@ -250,8 +251,8 @@ fn identifierType(l: *Lexer) Token.Type {
 
         't' => if (l.current > l.start and l.source[l.start + 1] == 'r')
             switch (l.source[l.start + 2]) {
-                'u' => l.checkKeyword(3, "e", ._true),
-                'y' => ._try,
+                'u' => l.checkKeyword(3, "e", .kw_true),
+                'y' => .kw_try,
                 else => .identifier,
             }
         else
@@ -361,7 +362,7 @@ fn testToken(lexeme: []const u8, typ: Token.Type) Token {
     return Token{
         .lexeme = lexeme,
         .type = typ,
-        .line = 0,
+        .line = 1,
     };
 }
 
@@ -437,6 +438,17 @@ test "simple" {
                 testToken("", .eof),
             },
         },
+        .{
+            .source = "2.2 + 1.0 + 2",
+            .expected = &.{
+                testToken("2.2", .number_float),
+                testToken("+", .plus),
+                testToken("1.0", .number_float),
+                testToken("+", .plus),
+                testToken("2", .number_int),
+                testToken("", .eof),
+            },
+        },
     };
 
     const gpa = std.testing.allocator;
@@ -457,9 +469,9 @@ test "more tokens" {
         .{
             .source = "2 + 2",
             .expected = &.{
-                testToken("2", .number),
+                testToken("2", .number_int),
                 testToken("+", .plus),
-                testToken("2", .number),
+                testToken("2", .number_int),
                 testToken("", .eof),
             },
         },
@@ -469,9 +481,9 @@ test "more tokens" {
             .source = "(1 * 3)",
             .expected = &.{
                 testToken("(", .left_paren),
-                testToken("1", .number),
+                testToken("1", .number_int),
                 testToken("*", .star),
-                testToken("3", .number),
+                testToken("3", .number_int),
                 testToken(")", .right_paren),
                 testToken("", .eof),
             },
@@ -483,7 +495,7 @@ test "more tokens" {
             .expected = &.{
                 testToken("x", .identifier),
                 testToken(":=", .colon_equal),
-                testToken("10", .number),
+                testToken("10", .number_int),
                 testToken("", .eof),
             },
         },
@@ -503,9 +515,9 @@ test "more tokens" {
         .{
             .source = "true and false",
             .expected = &.{
-                testToken("true", ._true),
-                testToken("and", ._and),
-                testToken("false", ._false),
+                testToken("true", .kw_true),
+                testToken("and", .kw_and),
+                testToken("false", .kw_false),
                 testToken("", .eof),
             },
         },
@@ -513,10 +525,10 @@ test "more tokens" {
         .{
             .source = "for i < 5",
             .expected = &.{
-                testToken("for", ._for),
+                testToken("for", .kw_for),
                 testToken("i", .identifier),
                 testToken("<", .less),
-                testToken("5", .number),
+                testToken("5", .number_int),
                 testToken("", .eof),
             },
         },
@@ -544,11 +556,11 @@ test "more tokens" {
         .{
             .source = "for i := range 10 { io.println(i); }",
             .expected = &.{
-                testToken("for", ._for),
+                testToken("for", .kw_for),
                 testToken("i", .identifier),
                 testToken(":=", .colon_equal),
-                testToken("range", .range),
-                testToken("10", .number),
+                testToken("range", .kw_range),
+                testToken("10", .number_int),
                 testToken("{", .left_brace),
                 testToken("io", .identifier),
                 testToken(".", .dot),
@@ -581,12 +593,12 @@ test "comments" {
         expected: []const Token,
     } = &.{
         .{
-            .source = "// This should not count at all\n2 + 2 // Neither should this",
+            .source = "// This should not count at all\n2 + 2 // Neither should this\n//Or this\n\n\n",
             .expected = &.{
-                testTokenLine("2", .number, 1),
-                testTokenLine("+", .plus, 1),
-                testTokenLine("2", .number, 1),
-                testTokenLine("", .eof, 1),
+                testTokenLine("2", .number_int, 2),
+                testTokenLine("+", .plus, 2),
+                testTokenLine("2", .number_int, 2),
+                testTokenLine("", .eof, 6),
             },
         },
     };

@@ -1,0 +1,309 @@
+const std = @import("std");
+const mem = std.mem;
+const Allocator = mem.Allocator;
+const Lexer = @import("Lexer.zig");
+const Token = Lexer.Token;
+const Io = std.Io;
+
+pub const Ast = struct {
+    pub const Binary = struct {
+        left: *Expr,
+        operator: Token,
+        right: *Expr,
+
+        pub fn format(expr: *const Binary, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{f} {s} {f}", .{ expr.left, expr.operator.lexeme, expr.right });
+        }
+    };
+
+    pub const Unary = struct {
+        operator: Token,
+        expr: *Expr,
+
+        pub fn format(expr: *const Unary, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{s}{f}", .{ expr.operator.lexeme, expr.expr });
+        }
+    };
+
+    pub const Literal = struct {
+        pub const Value = union(enum) {
+            integer: i32,
+            float: f64,
+            string: []const u8,
+            boolean: bool,
+
+            pub fn format(value: *const Value, w: *Io.Writer) Io.Writer.Error!void {
+                try switch (value.*) {
+                    .integer => |i| w.print("{}", .{i}),
+                    .float => |i| w.print("{d:7}", .{i}),
+                    .string => |i| w.print("{s}", .{i}),
+                    .boolean => |i| w.print("{}", .{i}),
+                };
+            }
+        };
+
+        value: Value,
+        token: Token,
+
+        pub fn format(expr: *const Literal, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{f}", .{expr.value});
+        }
+    };
+
+    pub const Grouping = struct {
+        paren: Token,
+        expr: *Expr,
+
+        pub fn format(expr: *const Grouping, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("({f})", .{expr.expr});
+        }
+    };
+
+    pub const Expr = union(enum) {
+        binary: Binary,
+        unary: Unary,
+        grouping: Grouping,
+        literal: Literal,
+
+        pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
+            try switch (expr.*) {
+                .binary => |b| w.print("{f}", .{b}),
+                .unary => |b| w.print("{f}", .{b}),
+                .grouping => |b| w.print("{f}", .{b}),
+                .literal => |b| w.print("{f}", .{b}),
+            };
+        }
+    };
+
+    arena: std.heap.ArenaAllocator,
+    expr: ?*Expr,
+};
+
+const Parser = struct {
+    arena: std.heap.ArenaAllocator,
+    lexer: *Lexer,
+    current: Token,
+    previous: Token,
+    panic_mode: bool,
+    had_error: bool,
+
+    const Precedence = enum {
+        lowest,
+        _or, // or
+        _and, // and
+        equality, // == !=
+        comparison, // < > <= >=
+        term, // + -
+        factor, // * /
+        unary, // ! -
+        call, // . ()
+
+        fn int(p: Precedence) u32 {
+            return @intFromEnum(p);
+        }
+
+        fn next(p: Precedence) Precedence {
+            return @enumFromInt(p.int() + 1);
+        }
+    };
+
+    const ParseRule = struct {
+        prefix: ?*const fn (p: *Parser) *Ast.Expr,
+        infix: ?*const fn (p: *Parser, left: *Ast.Expr) *Ast.Expr,
+        precedence: Precedence,
+    };
+
+    const parse_rules = [_]ParseRule{
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // left_paren
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // right_paren
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // left_brace
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // right_brace
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // comma
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // dot
+        .{ .prefix = unary, .infix = binary, .precedence = .term }, // minus
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // minus_equal
+        .{ .prefix = null, .infix = binary, .precedence = .term }, // plus
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // plus_equal
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // semicolon
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // colon
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // colon_equal
+        .{ .prefix = null, .infix = binary, .precedence = .factor }, // slash
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // slash_equal
+        .{ .prefix = null, .infix = binary, .precedence = .factor }, // star
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // star_equal
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // question
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // bang
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // bang_equal
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // equal
+        .{ .prefix = null, .infix = null, .precedence = .comparison }, // equal_equal
+        .{ .prefix = null, .infix = null, .precedence = .comparison }, // greater
+        .{ .prefix = null, .infix = null, .precedence = .comparison }, // greater_equal
+        .{ .prefix = null, .infix = null, .precedence = .comparison }, // less
+        .{ .prefix = null, .infix = null, .precedence = .comparison }, // less_equal
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // equal_greater
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // identifier
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // string
+        .{ .prefix = float, .infix = null, .precedence = .lowest }, // float
+        .{ .prefix = int, .infix = null, .precedence = .lowest }, // int
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _and
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _struct
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _else
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _false
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _for
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _fn
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _if
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _try
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // nil
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _or
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _return
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _true
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // mut
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // import
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _switch
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _enum
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // range
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _error
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // eof,
+    };
+
+    fn getRule(tt: Token.Type) *const ParseRule {
+        return &parse_rules[@intFromEnum(tt)];
+    }
+
+    pub fn init(gpa: Allocator, l: *Lexer) Parser {
+        var parser: Parser = .{
+            .arena = .init(gpa),
+            .lexer = l,
+            .current = undefined,
+            .previous = undefined,
+            .panic_mode = false,
+            .had_error = false,
+        };
+        parser.next();
+        parser.next();
+        return parser;
+    }
+
+    fn expression(p: *Parser, precedence: Precedence) *Ast.Expr {
+        const rule = getRule(p.previous.type);
+        const prefix = rule.prefix orelse {
+            p.reportError("expected expression.");
+            return undefined;
+        };
+        var expr = prefix(p);
+
+        while (!p.check(.semicolon) and precedence.int() < p.peekPrecedence().int()) {
+            const infix_rule = getRule(p.current.type);
+            const infix = infix_rule.infix orelse return expr;
+            p.next();
+            expr = infix(p, expr);
+        }
+        return expr;
+    }
+
+    fn peekPrecedence(p: *Parser) Precedence {
+        return getRule(p.current.type).precedence;
+    }
+
+    fn check(p: *Parser, ty: Token.Type) bool {
+        return p.current.type == ty;
+    }
+
+    fn grouping(p: *Parser) *Ast.Expr {
+        const paren = p.previous;
+        const expr = p.expression(.lowest);
+        p.consume(.right_paren, "Expect ')' after expression.");
+        return p.makeGrouping(expr, paren);
+    }
+
+    fn unary(p: *Parser) *Ast.Expr {
+        const operator = p.previous;
+        p.next();
+        const expr = p.expression(.unary);
+        return p.makeUnary(expr, operator);
+    }
+
+    fn float(p: *Parser) *Ast.Expr {
+        const value = std.fmt.parseFloat(f32, p.previous.lexeme) catch unreachable;
+        return p.makeLiteral(.{ .float = value }, p.previous);
+    }
+
+    fn int(p: *Parser) *Ast.Expr {
+        // think more on this since you can negate integers in the language,
+        // what happens if you negate the largest integer?
+        // same goes for the `float` function
+        const value = std.fmt.parseInt(i32, p.previous.lexeme, 10) catch unreachable;
+        return p.makeLiteral(.{ .integer = value }, p.previous);
+    }
+
+    fn binary(p: *Parser, left: *Ast.Expr) *Ast.Expr {
+        const operator = p.previous;
+        const prec = getRule(operator.type).precedence;
+        p.next();
+        const right = p.expression(prec);
+        return p.makeBinary(left, operator, right);
+    }
+
+    fn makeGrouping(p: *Parser, grping: *Ast.Expr, paren: Token) *Ast.Expr {
+        const e = p.makeExpr();
+        e.* = .{ .grouping = .{ .paren = paren, .expr = grping } };
+        return e;
+    }
+
+    fn makeUnary(p: *Parser, expr: *Ast.Expr, operator: Token) *Ast.Expr {
+        const e = p.makeExpr();
+        e.* = .{ .unary = .{ .expr = expr, .operator = operator } };
+        return e;
+    }
+
+    fn makeBinary(p: *Parser, left: *Ast.Expr, operator: Token, right: *Ast.Expr) *Ast.Expr {
+        const e = p.makeExpr();
+        e.* = .{ .binary = .{ .left = left, .operator = operator, .right = right } };
+        return e;
+    }
+
+    fn makeLiteral(p: *Parser, value: Ast.Literal.Value, token: Token) *Ast.Expr {
+        const e = p.makeExpr();
+        e.* = .{ .literal = .{ .token = token, .value = value } };
+        return e;
+    }
+
+    fn makeExpr(p: *Parser) *Ast.Expr {
+        return p.arena.allocator().create(Ast.Expr) catch unreachable;
+    }
+
+    fn next(p: *Parser) void {
+        p.previous = p.current;
+
+        while (true) {
+            p.current = p.lexer.scanToken();
+            if (p.current.type != ._error) break;
+            p.reportError(p.current.lexeme);
+        }
+    }
+
+    fn consume(p: *Parser, expected: Token.Type, msg: []const u8) void {
+        if (p.current.type != expected) {
+            p.reportError(msg);
+            return;
+        }
+        p.next();
+    }
+
+    fn reportError(p: *Parser, msg: []const u8) void {
+        if (p.panic_mode) return;
+        std.debug.print("[line {}]: {s}\n", .{ p.current.line, msg });
+
+        p.had_error = true;
+        p.panic_mode = true;
+    }
+};
+/// `arena.deinit` must be called even if expr is null
+pub fn parse(gpa: Allocator, l: *Lexer) Ast {
+    var p = Parser.init(gpa, l);
+    const expr = p.expression(.lowest);
+    return .{
+        .arena = p.arena,
+        .expr = if (p.had_error) null else expr,
+    };
+}

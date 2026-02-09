@@ -1,9 +1,9 @@
 # TODO
 
-Investigate having a minimum page size for arena buffers
 =======
 [x] Lexer
 [ ] Parser (astgen)
+[ ] Error report system (do this early)
 [ ] Semantic anaylsis + type checking
 [ ] Codegen + optimization
 [ ] Virtual machine + garbage collector
@@ -15,9 +15,18 @@ statements, ...
 
 [ ] Parse literals, arithmetic expressions
 [ ] Emit opcode for a basic AST
+[ ] Setup an error reporting system with line numbers, code snippet etc
 [ ] Setup a VM to run that opcode
 
 Think about error reporting alongside all of this as well
+
+#### Notes for next session
+
+There's a failing test case for the compiler. I think the reason that its failing is because
+of the parser. Work on fixing this and writing test cases for the compiler and the parser.
+After that, setup the VM so that it can handle basic arithmetic between floats and ints.
+I think after that I just want to introduce more expressions and focus on error handling.
+
 
 ### Norm
 
@@ -25,7 +34,7 @@ Type system, type inference, closures, go-like import system,
 
 ```
 
-import "io"
+import "fmt"
 
 add := fn (x, y: int) int {
     return x + y
@@ -33,21 +42,21 @@ add := fn (x, y: int) int {
 
 main := fn () {
     value := add(2, 3) // This is a constant
-    io.println("{value}")
+    fmt.println("{value}")
 
     // This is a comment
     mut x: int = 0
     x += 1
-    io.println("{x}")
+    fmt.println("{x}")
 
     // no mut allowed here
     for i := range 10 {
-        io.println("{}", i)
+        fmt.println("{}", i)
     }
 }
 
-read_all := fn () io.FileError!string {
-    f := try io.open_file("file.txt", "r")
+read_all := fn () fmt.FileError!string {
+    f := try fmt.open_file("file.txt", "r")
     return try f.read_all()
 }
 
@@ -107,7 +116,19 @@ switch_stmt := fn () {
 }
 
 var_args := fn(fmt: string, x: any...) {
-    io.println(fmt, x)
+    fmt.println(fmt, x)
+}
+
+```
+
+```
+// collections
+slice_functions := fn () {
+    slice := []int{}
+    fmt.println("len: {slice.len}, cap: {slice.cap}")
+
+    slice.append_slice({1, 2, 3, 4})
+    slice.append(5)
 }
 
 ```
