@@ -4,11 +4,11 @@ const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 const Compiler = compiler.Compiler;
+const Vm = @import("vm.zig").Vm;
 const Lexer = @import("Lexer.zig");
 const parser = @import("parser.zig");
 const compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
-const vm = @import("vm.zig");
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -60,15 +60,24 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
 
         var lexer = Lexer.init(line);
 
-        const ast = parser.parse(gpa, &lexer);
+        var ast = parser.parse(gpa, &lexer);
         defer ast.arena.deinit();
 
         if (ast.expr) |expr| {
-            try stdout.print("{f}\n", .{expr});
+            try stdout.print("[parser]: {f}\n", .{expr});
         } else {
             try stderr.print("parse error\n", .{});
             try stderr.flush();
         }
+
+        var chunk = compiler.compile(gpa, &ast);
+        defer chunk.deinit(gpa);
+
+        var vm = Vm.init(gpa, stdout, stderr);
+        defer vm.deinit();
+
+        const value = try vm.interpret(&chunk);
+        try stdout.print("{f}\n", .{value});
     }
 }
 
@@ -76,6 +85,5 @@ test {
     _ = Lexer;
     _ = parser.parse;
     _ = compiler.Compiler;
-    _ = vm.Vm;
     std.testing.refAllDeclsRecursive(@This());
 }
