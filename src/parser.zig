@@ -12,7 +12,7 @@ pub const Ast = struct {
         right: *Expr,
 
         pub fn format(expr: *const Binary, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{f} {s} {f}", .{ expr.left, expr.operator.lexeme, expr.right });
+            try w.print("({s} {f} {f})", .{ expr.operator.lexeme, expr.left, expr.right });
         }
     };
 
@@ -21,7 +21,7 @@ pub const Ast = struct {
         expr: *Expr,
 
         pub fn format(expr: *const Unary, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{s}{f}", .{ expr.operator.lexeme, expr.expr });
+            try w.print("{s} ({f})", .{ expr.operator.lexeme, expr.expr });
         }
     };
 
@@ -35,7 +35,7 @@ pub const Ast = struct {
             pub fn format(value: *const Value, w: *Io.Writer) Io.Writer.Error!void {
                 try switch (value.*) {
                     .integer => |i| w.print("{}", .{i}),
-                    .float => |i| w.print("{d:7}", .{i}),
+                    .float => |i| w.print("{d:.3}", .{i}),
                     .string => |i| w.print("{s}", .{i}),
                     .boolean => |i| w.print("{}", .{i}),
                 };
@@ -114,7 +114,7 @@ const Parser = struct {
     };
 
     const parse_rules = [_]ParseRule{
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // left_paren
+        .{ .prefix = grouping, .infix = null, .precedence = .lowest }, // left_paren
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // right_paren
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // left_brace
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // right_brace
@@ -211,6 +211,7 @@ const Parser = struct {
 
     fn grouping(p: *Parser) *Ast.Expr {
         const paren = p.previous;
+        p.next();
         const expr = p.expression(.lowest);
         p.consume(.right_paren, "Expect ')' after expression.");
         return p.makeGrouping(expr, paren);

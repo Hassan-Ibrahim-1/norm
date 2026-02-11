@@ -18,7 +18,6 @@ pub fn main() !void {
     defer std.process.argsFree(alloc, args);
 
     const stdin = std.fs.File.stdin();
-    _ = stdin; // autofix
 
     var stdout_buf: [1024]u8 = undefined;
     var stdout_w = std.fs.File.stdout().writer(&stdout_buf);
@@ -27,20 +26,11 @@ pub fn main() !void {
     var stderr_buf: [1024]u8 = undefined;
     var stderr_w = std.fs.File.stderr().writer(&stderr_buf);
     const stderr = &stderr_w.interface;
-    _ = stderr; // autofix
 
-    var c = Compiler.init(alloc);
-    var chunk = c.compile(undefined);
-    defer chunk.deinit(alloc);
-
-    debug.disassembleChunk(stdout, &chunk, "test chunk");
-
-    try stdout.flush();
-
-    // if (args.len == 2)
-    //     try runFile(alloc, args[1], stdout, stderr)
-    // else
-    //     try repl(alloc, stdout, stderr, stdin);
+    if (args.len == 2)
+        try runFile(alloc, args[1], stdout, stderr)
+    else
+        try repl(alloc, stdout, stderr, stdin);
 }
 
 fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !void {

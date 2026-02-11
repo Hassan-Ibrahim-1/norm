@@ -307,7 +307,7 @@ test "binary expression" {
                 .op_subtract,
                 .op_return,
             }),
-            .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 0 },
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 }, .{ .float = 4.0 }, .{ .float = 2.0 } },
         },
     };
