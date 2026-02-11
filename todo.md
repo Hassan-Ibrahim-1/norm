@@ -15,8 +15,9 @@ statements, ...
 
 [ ] Parse literals, arithmetic expressions
 [ ] Emit opcode for a basic AST
-[ ] Setup an error reporting system with line numbers, code snippet etc
 [ ] Setup a VM to run that opcode
+[ ] Write test cases for the parser
+[ ] Setup an error reporting system with line numbers, code snippet etc
 
 Think about error reporting alongside all of this as well
 
@@ -26,6 +27,8 @@ There's a failing test case for the compiler. I think the reason that its failin
 of the parser. Work on fixing this and writing test cases for the compiler and the parser.
 After that, setup the VM so that it can handle basic arithmetic between floats and ints.
 I think after that I just want to introduce more expressions and focus on error handling.
+
+add a floor operator just like python, rn integer division produces a float
 
 
 ### Norm

@@ -84,10 +84,10 @@ pub const Compiler = struct {
     gpa: Allocator,
     compiling_chunk: *Chunk,
 
-    pub fn init(gpa: Allocator) Compiler {
+    pub fn init(gpa: Allocator, chunk: *Chunk) Compiler {
         return .{
             .gpa = gpa,
-            .compiling_chunk = undefined,
+            .compiling_chunk = chunk,
         };
     }
 
@@ -164,20 +164,19 @@ pub const Compiler = struct {
         c.emitByte(a);
         c.emitByte(b);
     }
-
-    pub fn compile(c: *Compiler, ast: *Ast) Chunk {
-        var chunk: Chunk = .empty;
-
-        c.compiling_chunk = &chunk;
-
-        const expr = ast.expr orelse return chunk;
-        c.expression(expr);
-
-        c.emitOpCode(.op_return, 0);
-
-        return chunk;
-    }
 };
+
+pub fn compile(gpa: Allocator, ast: *Ast) Chunk {
+    var chunk: Chunk = .empty;
+    var c: Compiler = .init(gpa, &chunk);
+
+    const expr = ast.expr orelse return chunk;
+    c.expression(expr);
+
+    c.emitOpCode(.op_return, 0);
+
+    return chunk;
+}
 
 const testing = std.testing;
 const debug = @import("debug.zig");
@@ -213,8 +212,7 @@ fn testCompile(gpa: Allocator, source: []const u8) !Chunk {
     var l = Lexer.init(source);
     var ast = parser.parse(gpa, &l);
     defer ast.arena.deinit();
-    var compiler = Compiler.init(gpa);
-    return compiler.compile(&ast);
+    return compile(gpa, &ast);
 }
 
 const CompilerTestCase = struct {

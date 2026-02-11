@@ -12,11 +12,16 @@ pub fn build(b: *std.Build) void {
     });
 
     const no_bin = b.option(bool, "no-bin", "skip emitting binary") orelse false;
-    const debug = b.option(bool, "debug", "enable, debug logs, etc") orelse true;
+    const debug =
+        b.option(bool, "debug", "enable debug logs") orelse
+        (optimize == .Debug);
+
+    const debug_trace = b.option(bool, "debug-trace", "enable debug trace for vm") orelse false;
     const use_llvm = b.option(bool, "llvm", "force use of llvm backend");
 
     const opts = b.addOptions();
     opts.addOption(bool, "debug", debug);
+    opts.addOption(bool, "debug_trace", debug_trace);
     exe_mod.addOptions("opts", opts);
 
     const exe = b.addExecutable(.{

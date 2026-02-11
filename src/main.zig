@@ -8,6 +8,7 @@ const Lexer = @import("Lexer.zig");
 const parser = @import("parser.zig");
 const compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
+const vm = @import("vm.zig");
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -75,5 +76,6 @@ test {
     _ = Lexer;
     _ = parser.parse;
     _ = compiler.Compiler;
+    _ = vm.Vm;
     std.testing.refAllDeclsRecursive(@This());
 }
