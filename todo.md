@@ -1,6 +1,5 @@
-# TODO
+# Norm
 
-=======
 [x] Lexer
 [ ] Parser (astgen)
 [ ] Error report system (do this early)
@@ -8,25 +7,21 @@
 [ ] Codegen + optimization
 [ ] Virtual machine + garbage collector
 
-Produce a tree that just parses given types (doesn't infer yet), expressions,
-statements, ...
+Think about how a garbage collector fits here.
 
-### Now
+### Doing now
 
-[ ] Parse literals, arithmetic expressions
-[ ] Emit opcode for a basic AST
-[ ] Setup a VM to run that opcode
+[x] Parse literals, arithmetic expressions
+[x] Emit opcode for a basic AST
+[x] Setup a VM to run that opcode
 [ ] Write test cases for the parser
 [ ] Setup an error reporting system with line numbers, code snippet etc
-
-Think about error reporting alongside all of this as well
+[ ] Floor operator
+[ ] what now? strings, variables, functions, closures, structs, types
 
 #### Notes for next session
 
-There's a failing test case for the compiler. I think the reason that its failing is because
-of the parser. Work on fixing this and writing test cases for the compiler and the parser.
-After that, setup the VM so that it can handle basic arithmetic between floats and ints.
-I think after that I just want to introduce more expressions and focus on error handling.
+Write tests for parser,
 
 add a floor operator just like python, rn integer division produces a float
 
