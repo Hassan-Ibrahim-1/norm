@@ -17,7 +17,7 @@ Think about how a garbage collector fits here.
 [x] Write test cases for the parser
 [ ] Setup an error reporting system with line numbers, code snippet etc
 [ ] Floor operator
-[ ] what now? strings, variables, functions, closures, structs, types
+[ ] what now? booleans, strings, variables, functions, closures, structs, types
 
 #### Notes for next session
 
