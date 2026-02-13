@@ -14,14 +14,13 @@ Think about how a garbage collector fits here.
 [x] Parse literals, arithmetic expressions
 [x] Emit opcode for a basic AST
 [x] Setup a VM to run that opcode
-[ ] Write test cases for the parser
+[x] Write test cases for the parser
 [ ] Setup an error reporting system with line numbers, code snippet etc
 [ ] Floor operator
 [ ] what now? strings, variables, functions, closures, structs, types
 
 #### Notes for next session
 
-Write tests for parser,
 add a floor operator just like python, rn integer division produces a float
 
 

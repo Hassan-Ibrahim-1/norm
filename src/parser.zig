@@ -1,9 +1,12 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
+const Io = std.Io;
+const testing = std.testing;
+
+const debug = @import("debug.zig");
 const Lexer = @import("Lexer.zig");
 const Token = Lexer.Token;
-const Io = std.Io;
 
 pub const Ast = struct {
     pub const Binary = struct {
@@ -12,7 +15,7 @@ pub const Ast = struct {
         right: *Expr,
 
         pub fn format(expr: *const Binary, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("({s} {f} {f})", .{ expr.operator.lexeme, expr.left, expr.right });
+            try w.print("({f} {s} {f})", .{ expr.left, expr.operator.lexeme, expr.right });
         }
     };
 
@@ -21,7 +24,7 @@ pub const Ast = struct {
         expr: *Expr,
 
         pub fn format(expr: *const Unary, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{s} ({f})", .{ expr.operator.lexeme, expr.expr });
+            try w.print("({s}{f})", .{ expr.operator.lexeme, expr.expr });
         }
     };
 
@@ -55,7 +58,7 @@ pub const Ast = struct {
         expr: *Expr,
 
         pub fn format(expr: *const Grouping, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("({f})", .{expr.expr});
+            try w.print("{f}", .{expr.expr});
         }
     };
 
@@ -66,6 +69,7 @@ pub const Ast = struct {
         literal: Literal,
 
         pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
+            // _ = debug.dbgw(w, "", expr);
             try switch (expr.*) {
                 .binary => |b| w.print("{f}", .{b}),
                 .unary => |b| w.print("{f}", .{b}),
@@ -214,19 +218,19 @@ const Parser = struct {
         p.next();
         const expr = p.expression(.lowest);
         p.consume(.right_paren, "Expect ')' after expression.");
-        return p.makeGrouping(expr, paren);
+        return makeGrouping(p.arena.allocator(), expr, paren);
     }
 
     fn unary(p: *Parser) *Ast.Expr {
         const operator = p.previous;
         p.next();
         const expr = p.expression(.unary);
-        return p.makeUnary(expr, operator);
+        return makeUnary(p.arena.allocator(), expr, operator);
     }
 
     fn float(p: *Parser) *Ast.Expr {
         const value = std.fmt.parseFloat(f32, p.previous.lexeme) catch unreachable;
-        return p.makeLiteral(.{ .float = value }, p.previous);
+        return makeLiteral(p.arena.allocator(), .{ .float = value }, p.previous);
     }
 
     fn int(p: *Parser) *Ast.Expr {
@@ -234,7 +238,7 @@ const Parser = struct {
         // what happens if you negate the largest integer?
         // same goes for the `float` function
         const value = std.fmt.parseInt(i32, p.previous.lexeme, 10) catch unreachable;
-        return p.makeLiteral(.{ .integer = value }, p.previous);
+        return makeLiteral(p.arena.allocator(), .{ .integer = value }, p.previous);
     }
 
     fn binary(p: *Parser, left: *Ast.Expr) *Ast.Expr {
@@ -242,35 +246,7 @@ const Parser = struct {
         const prec = getRule(operator.type).precedence;
         p.next();
         const right = p.expression(prec);
-        return p.makeBinary(left, operator, right);
-    }
-
-    fn makeGrouping(p: *Parser, grping: *Ast.Expr, paren: Token) *Ast.Expr {
-        const e = p.makeExpr();
-        e.* = .{ .grouping = .{ .paren = paren, .expr = grping } };
-        return e;
-    }
-
-    fn makeUnary(p: *Parser, expr: *Ast.Expr, operator: Token) *Ast.Expr {
-        const e = p.makeExpr();
-        e.* = .{ .unary = .{ .expr = expr, .operator = operator } };
-        return e;
-    }
-
-    fn makeBinary(p: *Parser, left: *Ast.Expr, operator: Token, right: *Ast.Expr) *Ast.Expr {
-        const e = p.makeExpr();
-        e.* = .{ .binary = .{ .left = left, .operator = operator, .right = right } };
-        return e;
-    }
-
-    fn makeLiteral(p: *Parser, value: Ast.Literal.Value, token: Token) *Ast.Expr {
-        const e = p.makeExpr();
-        e.* = .{ .literal = .{ .token = token, .value = value } };
-        return e;
-    }
-
-    fn makeExpr(p: *Parser) *Ast.Expr {
-        return p.arena.allocator().create(Ast.Expr) catch unreachable;
+        return makeBinary(p.arena.allocator(), left, operator, right);
     }
 
     fn next(p: *Parser) void {
@@ -299,6 +275,7 @@ const Parser = struct {
         p.panic_mode = true;
     }
 };
+
 /// `arena.deinit` must be called even if expr is null
 pub fn parse(gpa: Allocator, l: *Lexer) Ast {
     var p = Parser.init(gpa, l);
@@ -307,4 +284,157 @@ pub fn parse(gpa: Allocator, l: *Lexer) Ast {
         .arena = p.arena,
         .expr = if (p.had_error) null else expr,
     };
+}
+
+fn makeGrouping(arena: Allocator, grping: *Ast.Expr, paren: Token) *Ast.Expr {
+    const e = makeExpr(arena);
+    e.* = .{ .grouping = .{ .paren = paren, .expr = grping } };
+    return e;
+}
+
+fn makeUnary(arena: Allocator, expr: *Ast.Expr, operator: Token) *Ast.Expr {
+    const e = makeExpr(arena);
+    e.* = .{ .unary = .{ .expr = expr, .operator = operator } };
+    return e;
+}
+
+fn makeBinary(arena: Allocator, left: *Ast.Expr, operator: Token, right: *Ast.Expr) *Ast.Expr {
+    const e = makeExpr(arena);
+    e.* = .{ .binary = .{ .left = left, .operator = operator, .right = right } };
+    return e;
+}
+
+fn makeLiteral(arena: Allocator, value: Ast.Literal.Value, token: Token) *Ast.Expr {
+    const e = makeExpr(arena);
+    e.* = .{ .literal = .{ .token = token, .value = value } };
+    return e;
+}
+
+fn makeExpr(arena: Allocator) *Ast.Expr {
+    return arena.create(Ast.Expr) catch unreachable;
+}
+
+fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
+    var l = Lexer.init(source);
+    var ast = parse(gpa, &l);
+    defer ast.arena.deinit();
+
+    const expr = ast.expr orelse return error.ParseError;
+    var aw = Io.Writer.Allocating.init(gpa);
+    try expr.format(&aw.writer);
+
+    return aw.toOwnedSlice();
+}
+
+test "arithmetic expressions" {
+    const gpa = std.testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "2",
+            .expected = "2",
+        },
+
+        .{
+            .source = "-67",
+            .expected = "(-67)",
+        },
+        .{
+            .source = "-1+2",
+            .expected = "((-1) + 2)",
+        },
+        .{
+            .source = "-(1+2)",
+            .expected = "(-(1 + 2))",
+        },
+        .{
+            .source = "(1+2) * 3",
+            .expected = "((1 + 2) * 3)",
+        },
+        .{
+            .source = "(1+2) * -3",
+            .expected = "((1 + 2) * (-3))",
+        },
+        .{
+            .source = "(1+2) / -3",
+            .expected = "((1 + 2) / (-3))",
+        },
+        .{
+            .source = "1+2+3+4",
+            .expected = "(((1 + 2) + 3) + 4)",
+        },
+        .{
+            .source = "1*2*3*4",
+            .expected = "(((1 * 2) * 3) * 4)",
+        },
+        .{
+            .source = "1+2*3",
+            .expected = "(1 + (2 * 3))",
+        },
+        .{
+            .source = "1*2+3",
+            .expected = "((1 * 2) + 3)",
+        },
+        .{
+            .source = "1-2-3",
+            .expected = "((1 - 2) - 3)",
+        },
+        .{
+            .source = "1-2+3",
+            .expected = "((1 - 2) + 3)",
+        },
+        .{
+            .source = "1/2/3",
+            .expected = "((1 / 2) / 3)",
+        },
+        .{
+            .source = "1/2*3",
+            .expected = "((1 / 2) * 3)",
+        },
+        .{
+            .source = "2*3+4*5",
+            .expected = "((2 * 3) + (4 * 5))",
+        },
+        .{
+            .source = "2+3*4+5",
+            .expected = "((2 + (3 * 4)) + 5)",
+        },
+        .{
+            .source = "-1*-2",
+            .expected = "((-1) * (-2))",
+        },
+        .{
+            .source = "--1",
+            .expected = "(-(-1))",
+        },
+        .{
+            .source = "1+2*3-4/5",
+            .expected = "((1 + (2 * 3)) - (4 / 5))",
+        },
+        .{
+            .source = "(1+2)*(3+4)",
+            .expected = "((1 + 2) * (3 + 4))",
+        },
+        .{
+            .source = "((1+2))",
+            .expected = "(1 + 2)",
+        },
+        .{
+            .source = "1.5+2.5",
+            .expected = "(1.500 + 2.500)",
+        },
+        .{
+            .source = "2.5*3.0",
+            .expected = "(2.500 * 3.000)",
+        },
+    };
+
+    for (tests) |t| {
+        const parsed = try testParse(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
 }

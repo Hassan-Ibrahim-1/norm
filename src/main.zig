@@ -68,6 +68,7 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
         } else {
             try stderr.print("parse error\n", .{});
             try stderr.flush();
+            continue;
         }
 
         var chunk = compiler.compile(gpa, &ast);
