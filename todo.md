@@ -22,7 +22,6 @@ Think about how a garbage collector fits here.
 #### Notes for next session
 
 Write tests for parser,
-
 add a floor operator just like python, rn integer division produces a float
 
 

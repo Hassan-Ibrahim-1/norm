@@ -251,6 +251,9 @@ test "basic" {
         .{ .source = "2 - 3", .expected = .{ .integer = -1 } },
         .{ .source = "2 * 3", .expected = .{ .integer = 6 } },
         .{ .source = "2 / 3", .expected = .{ .float = 2.0 / 3.0 } },
+        .{ .source = "(2 + 1) / 3", .expected = .{ .float = 1.0 } },
+        .{ .source = "-2", .expected = .{ .integer = -2 } },
+        .{ .source = "-(2 * 3)", .expected = .{ .integer = -6 } },
     };
 
     for (tests) |t| {
