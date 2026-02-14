@@ -15,10 +15,12 @@ Think about how a garbage collector fits here.
 - [x] Emit opcode for a basic AST
 - [x] Setup a VM to run that opcode
 - [x] Write test cases for the parser
-- [ ] Setup an error reporting system with line numbers, code snippet etc
-- [ ] boolean expressions
+- [x] Setup an error reporting system with line numbers, code snippet etc
+- [x] boolean expressions
+- [ ] nil
 - [ ] comparison operators
 - [ ] logical operators (not, and, or)
+- [ ] How will basic types work (how should `true + false` be disallowed)
 - [ ] strings + string interning for comparisons? look at go for inspiration
 - [ ] global constant string table
 - [ ] think about garbage collection

@@ -162,7 +162,7 @@ const Parser = struct {
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _and
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _struct
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _else
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _false
+        .{ .prefix = boolean, .infix = null, .precedence = .lowest }, // _false
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _for
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _fn
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _if
@@ -170,7 +170,7 @@ const Parser = struct {
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // nil
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _or
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _return
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _true
+        .{ .prefix = boolean, .infix = null, .precedence = .lowest }, // _true
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // mut
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // import
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _switch
@@ -252,6 +252,15 @@ const Parser = struct {
         // same goes for the `float` function
         const value = std.fmt.parseInt(i32, p.previous.lexeme, 10) catch unreachable;
         return makeLiteral(p.arena.allocator(), .{ .integer = value }, p.previous);
+    }
+
+    fn boolean(p: *Parser) *Ast.Expr {
+        const value = switch (p.previous.type) {
+            .kw_true => true,
+            .kw_false => false,
+            else => unreachable,
+        };
+        return makeLiteral(p.arena.allocator(), .{ .boolean = value }, p.previous);
     }
 
     fn binary(p: *Parser, left: *Ast.Expr) *Ast.Expr {

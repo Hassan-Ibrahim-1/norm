@@ -21,7 +21,15 @@ pub const OpCode = enum(u8) {
     op_multiply,
     op_divide,
 
-    // VM: Push a constant off the stack and then push one
+    // Boolean values
+    //
+    // VM: Push `true` or `false` onto the stack
+    op_true,
+    op_false,
+
+    // Negate an integer of a float
+    //
+    // VM: Pop a constant off the stack and then push negated
     op_negate,
 
     // Temporary: Signals end of execution
@@ -128,19 +136,23 @@ pub const Compiler = struct {
     }
 
     fn literal(c: *Compiler, l: *Ast.Literal) void {
-        c.compiling_chunk.writeConstant(
-            c.gpa,
-            litValToVal(l.value),
-            l.token.line,
-        );
-    }
-
-    fn litValToVal(l: Ast.Literal.Value) Value {
-        return switch (l) {
-            .float => .{ .float = l.float },
-            .integer => .{ .integer = l.integer },
-            else => unreachable,
-        };
+        switch (l.value) {
+            .float => |f| c.compiling_chunk.writeConstant(
+                c.gpa,
+                .{ .float = f },
+                l.token.line,
+            ),
+            .integer => |i| c.compiling_chunk.writeConstant(
+                c.gpa,
+                .{ .integer = i },
+                l.token.line,
+            ),
+            .boolean => |b| if (b)
+                c.emitOpCode(.op_true, l.token.line)
+            else
+                c.emitOpCode(.op_false, l.token.line),
+            .string => @panic("todo"),
+        }
     }
 
     fn emitConstant(c: *Compiler, value: Value, line: u32) void {

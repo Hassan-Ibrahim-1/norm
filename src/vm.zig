@@ -109,9 +109,13 @@ pub const Vm = struct {
                     const negated: Value = switch (a) {
                         .float => |f| .{ .float = -f },
                         .integer => |i| .{ .integer = -i },
+                        else => unreachable,
                     };
                     vm.push(negated);
                 },
+
+                .op_true => vm.push(.{ .boolean = true }),
+                .op_false => vm.push(.{ .boolean = false }),
 
                 .op_return => {
                     return vm.pop();
@@ -172,6 +176,7 @@ fn valueAdd(a: Value, b: Value) Value {
             .{ .integer = ai + b.integer }
         else
             .{ .float = cast.as(f64, ai) + b.float },
+        else => unreachable,
     };
 }
 
@@ -186,6 +191,7 @@ fn valueSubtract(a: Value, b: Value) Value {
             .{ .integer = ai - b.integer }
         else
             .{ .float = cast.as(f64, ai) - b.float },
+        else => unreachable,
     };
 }
 
@@ -200,6 +206,7 @@ fn valueMultiply(a: Value, b: Value) Value {
             .{ .integer = ai * b.integer }
         else
             .{ .float = cast.as(f64, ai) * b.float },
+        else => unreachable,
     };
 }
 
@@ -214,6 +221,7 @@ fn valueDivide(a: Value, b: Value) Value {
             .{ .float = cast.as(f64, ai) / cast.as(f64, b.integer) }
         else
             .{ .float = cast.as(f64, ai) / b.float },
+        else => unreachable,
     };
 }
 
