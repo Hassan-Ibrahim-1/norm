@@ -16,13 +16,9 @@ Think about how a garbage collector fits here.
 [x] Setup a VM to run that opcode
 [x] Write test cases for the parser
 [ ] Setup an error reporting system with line numbers, code snippet etc
-[ ] Floor operator
 [ ] what now? booleans, strings, variables, functions, closures, structs, types
 
 #### Notes for next session
-
-add a floor operator just like python, rn integer division produces a float
-
 
 ### Norm
 
