@@ -67,13 +67,21 @@ read_all := fn () fmt.FileError!string {
     return try f.read_all()
 }
 
-index_of := fn (s: string, target: u8) ?int {
+index_of := fn (s: string, target: char) ?int {
     for i, c := range s {
         if c == target {
             return i
         }
     }
     return nil
+}
+
+replace_with := fn (s: []mut int, old, new: int) {
+    for i := range s {
+        if s[i] == old {
+            s[i] = new
+        }
+    }
 }
 
 ```
@@ -136,6 +144,40 @@ slice_functions := fn () {
 
     slice.append_slice({1, 2, 3, 4})
     slice.append(5)
+}
+
+```
+
+
+```
+
+// Generics?
+
+Eq := trait {
+    eql: fn (a, b: Self) bool
+}
+
+Vec2 := struct {
+    x: f32,
+    y: f32,
+
+    // Eq
+    eql := (a, b: Self) bool {
+        if a.x == b.x and a.y == b.y {
+            return true
+        }
+        return false
+    }
+}
+
+index_of := fn (s: []T, target: T) ?int
+    where T: Eq {
+    for i, n := range s {
+        if n == target {
+            return i
+        }
+    }
+    return nil
 }
 
 ```
