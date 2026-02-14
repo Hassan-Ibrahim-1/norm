@@ -1,28 +1,43 @@
-# Norm
+## Norm
 
-[x] Lexer
-[ ] Parser (astgen)
-[ ] Error report system (do this early)
-[ ] Semantic anaylsis + type checking
-[ ] Codegen + optimization
-[ ] Virtual machine + garbage collector
+- [x] Lexer
+- [ ] Parser (astgen)
+- [ ] Error report system (do this early)
+- [ ] Semantic anaylsis + type checking
+- [ ] Codegen + optimization
+- [ ] Virtual machine + garbage collector
 
 Think about how a garbage collector fits here.
 
 ### Doing now
 
-[x] Parse literals, arithmetic expressions
-[x] Emit opcode for a basic AST
-[x] Setup a VM to run that opcode
-[x] Write test cases for the parser
-[ ] Setup an error reporting system with line numbers, code snippet etc
-[ ] what now? booleans, strings, variables, functions, closures, structs, types
+- [x] Parse literals, arithmetic expressions
+- [x] Emit opcode for a basic AST
+- [x] Setup a VM to run that opcode
+- [x] Write test cases for the parser
+- [ ] Setup an error reporting system with line numbers, code snippet etc
+- [ ] boolean expressions
+- [ ] comparison operators
+- [ ] logical operators (not, and, or)
+- [ ] strings + string interning for comparisons?
+- [ ] global constant string table
+- [ ] think about garbage collection
+- [ ] variable declartions + expressions
+- [ ] variable mutability + assignment
+- [ ] what now? booleans, strings, variables, functions, closures, structs, types
 
 #### Notes for next session
 
-### Norm
+There should be a constant string table like how compiled languages do it. No
+need for extra allocations.
+
+#### Language Ideas
 
 Type system, type inference, closures, go-like import system,
+
+How do you inline a function? This would be a fun optimization. Having variable
+levels of inlining to balance compilation speed and runtime performance would
+also be interesting.
 
 ```
 
