@@ -241,7 +241,7 @@ const CompilerTestCase = struct {
     expected_constants: []const Value,
 };
 
-test "number literals" {
+test "literals" {
     const gpa = std.testing.allocator;
     const tests: []const CompilerTestCase = &.{
         .{
@@ -255,6 +255,24 @@ test "number literals" {
             .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_return }),
             .expected_lines = &.{ 1, 1, 0 },
             .expected_constants = &.{.{ .float = 3.0 }},
+        },
+        .{
+            .source = "true",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_true, .op_return }),
+            .expected_lines = &.{ 1, 0 },
+            .expected_constants = &.{},
+        },
+        .{
+            .source = "false",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_false, .op_return }),
+            .expected_lines = &.{ 1, 0 },
+            .expected_constants = &.{},
+        },
+        .{
+            .source = "nil",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_nil, .op_return }),
+            .expected_lines = &.{ 1, 0 },
+            .expected_constants = &.{},
         },
     };
 

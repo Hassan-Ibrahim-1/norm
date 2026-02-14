@@ -476,3 +476,24 @@ test "arithmetic expressions" {
         try testing.expectEqualStrings(t.expected, parsed);
     }
 }
+
+test "literals" {
+    const gpa = std.testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{ .source = "1", .expected = "1" },
+        .{ .source = "2.0", .expected = "2.000" },
+        .{ .source = "true", .expected = "true" },
+        .{ .source = "false", .expected = "false" },
+        .{ .source = "nil", .expected = "nil" },
+    };
+
+    for (tests) |t| {
+        const parsed = try testParse(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
