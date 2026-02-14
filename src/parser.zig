@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const Io = std.Io;
+const ers = @import("errors.zig");
 const testing = std.testing;
 
 const debug = @import("debug.zig");
@@ -80,7 +81,15 @@ pub const Ast = struct {
     };
 
     arena: std.heap.ArenaAllocator,
-    expr: ?*Expr,
+    expr: *Expr,
+    errors: []Diagnostics,
+};
+
+pub const Diagnostics = struct {
+    line: u32,
+    hints: []const []const u8 = &.{},
+    notes: []const []const u8 = &.{},
+    error_msg: []const u8,
 };
 
 const Parser = struct {
@@ -88,8 +97,9 @@ const Parser = struct {
     lexer: *Lexer,
     current: Token,
     previous: Token,
+    // TODO: reset on statement boundary
     panic_mode: bool,
-    had_error: bool,
+    errors: std.ArrayList(Diagnostics),
 
     const Precedence = enum {
         lowest,
@@ -181,7 +191,7 @@ const Parser = struct {
             .current = undefined,
             .previous = undefined,
             .panic_mode = false,
-            .had_error = false,
+            .errors = .empty,
         };
         parser.next();
         parser.next();
@@ -191,7 +201,10 @@ const Parser = struct {
     fn expression(p: *Parser, precedence: Precedence) *Ast.Expr {
         const rule = getRule(p.previous.type);
         const prefix = rule.prefix orelse {
-            p.reportError("expected expression.");
+            p.reportError(.{
+                .error_msg = "expected expression.",
+                .line = p.previous.line,
+            });
             return undefined;
         };
         var expr = prefix(p);
@@ -255,23 +268,27 @@ const Parser = struct {
         while (true) {
             p.current = p.lexer.scanToken();
             if (p.current.type != ._error) break;
-            p.reportError(p.current.lexeme);
+            p.reportError(.{
+                .error_msg = p.current.lexeme,
+                .line = p.current.line,
+            });
         }
     }
 
     fn consume(p: *Parser, expected: Token.Type, msg: []const u8) void {
         if (p.current.type != expected) {
-            p.reportError(msg);
+            p.reportError(.{
+                .error_msg = msg,
+                .line = p.current.line,
+            });
             return;
         }
         p.next();
     }
 
-    fn reportError(p: *Parser, msg: []const u8) void {
+    fn reportError(p: *Parser, diag: Diagnostics) void {
         if (p.panic_mode) return;
-        std.debug.print("[line {}]: {s}\n", .{ p.current.line, msg });
-
-        p.had_error = true;
+        p.errors.append(p.arena.allocator(), diag) catch unreachable;
         p.panic_mode = true;
     }
 };
@@ -280,9 +297,11 @@ const Parser = struct {
 pub fn parse(gpa: Allocator, l: *Lexer) Ast {
     var p = Parser.init(gpa, l);
     const expr = p.expression(.lowest);
+    const errors = p.errors.toOwnedSlice(p.arena.allocator()) catch unreachable;
     return .{
         .arena = p.arena,
-        .expr = if (p.had_error) null else expr,
+        .errors = errors,
+        .expr = expr,
     };
 }
 
@@ -318,8 +337,12 @@ fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
     var l = Lexer.init(source);
     var ast = parse(gpa, &l);
     defer ast.arena.deinit();
+    if (ast.errors.len > 0) {
+        _ = debug.dbg("ast.errors", ast.errors);
+        return error.ParserError;
+    }
 
-    const expr = ast.expr orelse return error.ParseError;
+    const expr = ast.expr;
     var aw = Io.Writer.Allocating.init(gpa);
     try expr.format(&aw.writer);
 

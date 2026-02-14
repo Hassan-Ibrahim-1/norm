@@ -3,7 +3,7 @@ const mem = std.mem;
 const Io = std.Io;
 
 pub const Diagnostics = struct {
-    file_name: []const u8,
+    file_name: []const u8 = "",
     source: []const u8,
     line: u32,
     hints: []const []const u8 = &.{},

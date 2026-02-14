@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 const Compiler = compiler.Compiler;
 const Vm = @import("vm.zig").Vm;
 const Lexer = @import("Lexer.zig");
+const ers = @import("errors.zig");
 const parser = @import("parser.zig");
 const compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
@@ -62,14 +63,14 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
 
         var ast = parser.parse(gpa, &lexer);
         defer ast.arena.deinit();
-
-        if (ast.expr) |expr| {
-            try stdout.print("[parser]: {f}\n", .{expr});
-        } else {
-            try stderr.print("parse error\n", .{});
+        if (ast.errors.len > 0) {
+            for (ast.errors) |diag| {
+                try stderr.print("{s}\n", .{diag.error_msg});
+            }
             try stderr.flush();
             continue;
         }
+        try stdout.print("[parser]: {f}\n", .{ast.expr});
 
         var chunk = compiler.compile(gpa, &ast);
         defer chunk.deinit(gpa);

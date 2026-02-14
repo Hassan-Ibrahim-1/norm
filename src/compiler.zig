@@ -168,9 +168,10 @@ pub const Compiler = struct {
 
 pub fn compile(gpa: Allocator, ast: *Ast) Chunk {
     var chunk: Chunk = .empty;
+    if (ast.errors.len > 0) return chunk;
     var c: Compiler = .init(gpa, &chunk);
 
-    const expr = ast.expr orelse return chunk;
+    const expr = ast.expr;
     c.expression(expr);
 
     c.emitOpCode(.op_return, 0);
