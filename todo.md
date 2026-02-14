@@ -19,7 +19,7 @@ Think about how a garbage collector fits here.
 - [ ] boolean expressions
 - [ ] comparison operators
 - [ ] logical operators (not, and, or)
-- [ ] strings + string interning for comparisons?
+- [ ] strings + string interning for comparisons? look at go for inspiration
 - [ ] global constant string table
 - [ ] think about garbage collection
 - [ ] variable declartions + expressions
