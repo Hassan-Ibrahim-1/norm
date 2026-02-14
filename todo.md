@@ -17,7 +17,7 @@ Think about how a garbage collector fits here.
 - [x] Write test cases for the parser
 - [x] Setup an error reporting system with line numbers, code snippet etc
 - [x] boolean expressions
-- [ ] nil
+- [x] nil
 - [ ] comparison operators
 - [ ] logical operators (not, and, or)
 - [ ] How will basic types work (how should `true + false` be disallowed)
@@ -26,6 +26,8 @@ Think about how a garbage collector fits here.
 - [ ] think about garbage collection
 - [ ] variable declartions + expressions
 - [ ] variable mutability + assignment
+- [ ] Think about debug info, instead of each chunk having line numbers there
+could be pointers to a debug info table. Would allow variable/function names, types etc.
 - [ ] what now? booleans, strings, variables, functions, closures, structs, types
 
 #### Notes for next session

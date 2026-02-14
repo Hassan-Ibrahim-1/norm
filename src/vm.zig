@@ -116,6 +116,7 @@ pub const Vm = struct {
 
                 .op_true => vm.push(.{ .boolean = true }),
                 .op_false => vm.push(.{ .boolean = false }),
+                .op_nil => vm.push(.nil),
 
                 .op_return => {
                     return vm.pop();

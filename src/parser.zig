@@ -35,6 +35,7 @@ pub const Ast = struct {
             float: f64,
             string: []const u8,
             boolean: bool,
+            nil: void,
 
             pub fn format(value: *const Value, w: *Io.Writer) Io.Writer.Error!void {
                 try switch (value.*) {
@@ -42,6 +43,7 @@ pub const Ast = struct {
                     .float => |i| w.print("{d:.3}", .{i}),
                     .string => |i| w.print("{s}", .{i}),
                     .boolean => |i| w.print("{}", .{i}),
+                    .nil => w.print("nil", .{}),
                 };
             }
         };
@@ -167,7 +169,7 @@ const Parser = struct {
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _fn
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _if
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _try
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // nil
+        .{ .prefix = nil, .infix = null, .precedence = .lowest }, // nil
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _or
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _return
         .{ .prefix = boolean, .infix = null, .precedence = .lowest }, // _true
@@ -261,6 +263,10 @@ const Parser = struct {
             else => unreachable,
         };
         return makeLiteral(p.arena.allocator(), .{ .boolean = value }, p.previous);
+    }
+
+    fn nil(p: *Parser) *Ast.Expr {
+        return makeLiteral(p.arena.allocator(), .nil, p.previous);
     }
 
     fn binary(p: *Parser, left: *Ast.Expr) *Ast.Expr {

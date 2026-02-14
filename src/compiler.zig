@@ -32,6 +32,11 @@ pub const OpCode = enum(u8) {
     // VM: Pop a constant off the stack and then push negated
     op_negate,
 
+    // Nil value
+    //
+    // VM: Push nil on the stack
+    op_nil,
+
     // Temporary: Signals end of execution
     op_return,
 
@@ -151,6 +156,7 @@ pub const Compiler = struct {
                 c.emitOpCode(.op_true, l.token.line)
             else
                 c.emitOpCode(.op_false, l.token.line),
+            .nil => c.emitOpCode(.op_nil, l.token.line),
             .string => @panic("todo"),
         }
     }
