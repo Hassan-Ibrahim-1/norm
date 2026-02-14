@@ -144,6 +144,7 @@ slice_functions := fn () {
 
     slice.append_slice({1, 2, 3, 4})
     slice.append(5)
+    assert(slice.index_of(1) == 0)
 }
 
 ```
@@ -171,13 +172,24 @@ Vec2 := struct {
 }
 
 index_of := fn (s: []T, target: T) ?int
-    where T: Eq {
+    where T: Eq
+{
     for i, n := range s {
         if n == target {
             return i
         }
     }
     return nil
+}
+
+main := fn () {
+    a := Vec2{1, 2}
+    b := Vec2{1, 2}
+    
+    slice := []Vec2{a, b}
+
+    assert(index_of(slice, a) == 0)
+    assert(index_of(slice, b) == 1)
 }
 
 ```
