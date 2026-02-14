@@ -21,6 +21,7 @@ Think about how a garbage collector fits here.
 - [ ] comparison operators
 - [ ] logical operators (not, and, or)
 - [ ] How will basic types work (how should `true + false` be disallowed)
+compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [ ] strings + string interning for comparisons? look at go for inspiration
 - [ ] global constant string table
 - [ ] think about garbage collection
