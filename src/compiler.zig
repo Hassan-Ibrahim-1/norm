@@ -36,10 +36,22 @@ pub const OpCode = enum(u8) {
     //
     // VM: Pop two constants off the stack, compare them, and then push a boolean value
     op_equal,
+    op_not_equal,
     op_greater,
     op_greater_equal,
     op_less,
     op_less_equal,
+
+    // Binary logical operators
+    //
+    // VM: Pop two constants off the stack and then push a boolean value
+    op_and,
+    op_or,
+
+    // Unary logical operator
+    //
+    // VM: Pop off one constant and then push a boolean value
+    op_not,
 
     // Nil value
     //
@@ -133,10 +145,13 @@ pub const Compiler = struct {
             .star => c.emitOpCode(.op_multiply, line),
             .slash => c.emitOpCode(.op_divide, line),
             .equal_equal => c.emitOpCode(.op_equal, line),
+            .bang_equal => c.emitOpCode(.op_not_equal, line),
             .greater => c.emitOpCode(.op_greater, line),
             .greater_equal => c.emitOpCode(.op_greater_equal, line),
             .less => c.emitOpCode(.op_less, line),
             .less_equal => c.emitOpCode(.op_less_equal, line),
+            .kw_and => c.emitOpCode(.op_and, line),
+            .kw_or => c.emitOpCode(.op_or, line),
             else => unreachable,
         }
     }
@@ -146,6 +161,7 @@ pub const Compiler = struct {
         const line = u.operator.line;
         switch (u.operator.type) {
             .minus => c.emitOpCode(.op_negate, line),
+            .bang => c.emitOpCode(.op_not, line),
             else => unreachable,
         }
     }
@@ -301,7 +317,7 @@ test "literals" {
     }
 }
 
-test "binary expression" {
+test "arithmetic expressions" {
     const gpa = std.testing.allocator;
     const tests: []const CompilerTestCase = &.{
         .{
@@ -359,11 +375,92 @@ test "binary expression" {
             .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 }, .{ .float = 4.0 }, .{ .float = 2.0 } },
         },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit(gpa);
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
+        try testing.expectEqualSlices(Value, t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "comparison" {
+    const gpa = testing.allocator;
+    const tests: []const CompilerTestCase = &.{
+        // TODO: use something other than numbers
         .{
             .source = "2 < 3",
             .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_less, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
+        },
+        .{
+            .source = "2 <= 3",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_less_equal, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
+        },
+        .{
+            .source = "2 > 3",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_greater, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
+        },
+        .{
+            .source = "2 >= 3",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_greater_equal, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
+        },
+        .{
+            .source = "2 == 3",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_equal, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
+        },
+        .{
+            .source = "2 != 3",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_not_equal, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit(gpa);
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
+        try testing.expectEqualSlices(Value, t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "logical" {
+    const gpa = testing.allocator;
+    const tests: []const CompilerTestCase = &.{
+        .{
+            .source = "true and true",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_true, .op_true, .op_and, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 0 },
+            .expected_constants = &.{},
+        },
+        .{
+            .source = "true or false",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_true, .op_false, .op_or, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 0 },
+            .expected_constants = &.{},
+        },
+        .{
+            .source = "!false",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_false, .op_not, .op_return }),
+            .expected_lines = &.{ 1, 1, 0 },
+            .expected_constants = &.{},
         },
     };
 

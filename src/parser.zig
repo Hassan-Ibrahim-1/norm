@@ -148,8 +148,8 @@ const Parser = struct {
         .{ .prefix = null, .infix = binary, .precedence = .factor }, // star
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // star_equal
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // question
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // bang
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // bang_equal
+        .{ .prefix = unary, .infix = null, .precedence = .unary }, // bang
+        .{ .prefix = null, .infix = binary, .precedence = .comparison }, // bang_equal
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // equal
         .{ .prefix = null, .infix = binary, .precedence = .comparison }, // equal_equal
         .{ .prefix = null, .infix = binary, .precedence = .comparison }, // greater
@@ -161,7 +161,7 @@ const Parser = struct {
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // string
         .{ .prefix = float, .infix = null, .precedence = .lowest }, // float
         .{ .prefix = int, .infix = null, .precedence = .lowest }, // int
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _and
+        .{ .prefix = null, .infix = binary, .precedence = ._and }, // _and
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _struct
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _else
         .{ .prefix = boolean, .infix = null, .precedence = .lowest }, // _false
@@ -170,7 +170,7 @@ const Parser = struct {
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _if
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _try
         .{ .prefix = nil, .infix = null, .precedence = .lowest }, // nil
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _or
+        .{ .prefix = null, .infix = binary, .precedence = ._or }, // _or
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _return
         .{ .prefix = boolean, .infix = null, .precedence = .lowest }, // _true
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // mut
@@ -506,6 +506,28 @@ test "comparison" {
         expected: []const u8,
     } = &.{
         .{ .source = "1 > 2", .expected = "(1 > 2)" },
+        .{ .source = "1 != 2", .expected = "(1 != 2)" },
+        // TODO:
+    };
+
+    for (tests) |t| {
+        const parsed = try testParse(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
+
+test "logical" {
+    const gpa = std.testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{ .source = "true or false", .expected = "(true or false)" },
+        .{ .source = "true and true", .expected = "(true and true)" },
+        .{ .source = "!false", .expected = "(!false)" },
+        .{ .source = "!true", .expected = "(!true)" },
         // TODO:
     };
 

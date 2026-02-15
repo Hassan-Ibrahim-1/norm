@@ -18,8 +18,10 @@ Think about how a garbage collector fits here.
 - [x] Setup an error reporting system with line numbers, code snippet etc
 - [x] boolean expressions
 - [x] nil
-- [ ] comparison operators
-- [ ] logical operators (not, and, or)
+- [x] comparison operators
+- [x] logical operators (not, and, or)
+- [ ] Precedence tests for logical and comparison operators
+- [ ] type checking for basic operations
 - [ ] How will basic types work (how should `true + false` be disallowed)
 compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [ ] strings + string interning for comparisons? look at go for inspiration

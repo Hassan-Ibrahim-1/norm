@@ -129,6 +129,17 @@ pub const Vm = struct {
                     };
                     vm.push(.{ .boolean = value });
                 },
+                .op_not_equal => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    const value = switch (a) {
+                        .integer => a.integer != b.integer,
+                        .float => a.float != b.float,
+                        .boolean => a.boolean != b.boolean,
+                        .nil => false,
+                    };
+                    vm.push(.{ .boolean = value });
+                },
                 .op_greater => {
                     const b = vm.pop();
                     const a = vm.pop();
@@ -168,6 +179,21 @@ pub const Vm = struct {
                         .boolean, .nil => unreachable,
                     };
                     vm.push(.{ .boolean = value });
+                },
+
+                .op_and => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = a.boolean and b.boolean });
+                },
+                .op_or => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = a.boolean or b.boolean });
+                },
+                .op_not => {
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = !a.boolean });
                 },
 
                 .op_return => {
@@ -338,6 +364,65 @@ test "arithmetic" {
         .{ .source = "(2 + 1) / 3", .expected = .{ .float = 1.0 } },
         .{ .source = "-2", .expected = .{ .integer = -2 } },
         .{ .source = "-(2 * 3)", .expected = .{ .integer = -6 } },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const value = try testRun(gpa, t.source, w, w);
+        try testing.expectEqual(t.expected, value);
+    }
+}
+
+test "comparison" {
+    const gpa = testing.allocator;
+    var discarding: Io.Writer.Discarding = .init(&.{});
+    const w = &discarding.writer;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{
+        .{ .source = "true == true", .expected = .{ .boolean = true } },
+        .{ .source = "false == true", .expected = .{ .boolean = false } },
+        .{ .source = "false != true", .expected = .{ .boolean = true } },
+        .{ .source = "nil == nil", .expected = .{ .boolean = true } },
+        .{ .source = "nil != nil", .expected = .{ .boolean = false } },
+        .{ .source = "1 == 1", .expected = .{ .boolean = true } },
+        .{ .source = "1 != 1", .expected = .{ .boolean = false } },
+        .{ .source = "1 == 2", .expected = .{ .boolean = false } },
+        .{ .source = "1 != 2", .expected = .{ .boolean = true } },
+        .{ .source = "1 < 2", .expected = .{ .boolean = true } },
+        .{ .source = "1 <= 2", .expected = .{ .boolean = true } },
+        .{ .source = "1 > 2", .expected = .{ .boolean = false } },
+        .{ .source = "1 >= 2", .expected = .{ .boolean = false } },
+        .{ .source = "2 > 1", .expected = .{ .boolean = true } },
+        .{ .source = "2 >= 1", .expected = .{ .boolean = true } },
+        .{ .source = "2 < 1", .expected = .{ .boolean = false } },
+        .{ .source = "2 <= 1", .expected = .{ .boolean = false } },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const value = try testRun(gpa, t.source, w, w);
+        try testing.expectEqual(t.expected, value);
+    }
+}
+
+test "logical" {
+    const gpa = testing.allocator;
+    var discarding: Io.Writer.Discarding = .init(&.{});
+    const w = &discarding.writer;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{
+        .{ .source = "true and true", .expected = .{ .boolean = true } },
+        .{ .source = "true and false", .expected = .{ .boolean = false } },
+        .{ .source = "true or false", .expected = .{ .boolean = true } },
+        .{ .source = "false or false", .expected = .{ .boolean = false } },
+        .{ .source = "!true", .expected = .{ .boolean = false } },
+        .{ .source = "!false", .expected = .{ .boolean = true } },
     };
 
     for (tests) |t| {
