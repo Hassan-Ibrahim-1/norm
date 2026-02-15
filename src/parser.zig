@@ -151,11 +151,11 @@ const Parser = struct {
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // bang
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // bang_equal
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // equal
-        .{ .prefix = null, .infix = null, .precedence = .comparison }, // equal_equal
-        .{ .prefix = null, .infix = null, .precedence = .comparison }, // greater
-        .{ .prefix = null, .infix = null, .precedence = .comparison }, // greater_equal
-        .{ .prefix = null, .infix = null, .precedence = .comparison }, // less
-        .{ .prefix = null, .infix = null, .precedence = .comparison }, // less_equal
+        .{ .prefix = null, .infix = binary, .precedence = .comparison }, // equal_equal
+        .{ .prefix = null, .infix = binary, .precedence = .comparison }, // greater
+        .{ .prefix = null, .infix = binary, .precedence = .comparison }, // greater_equal
+        .{ .prefix = null, .infix = binary, .precedence = .comparison }, // less
+        .{ .prefix = null, .infix = binary, .precedence = .comparison }, // less_equal
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // equal_greater
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // identifier
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // string
@@ -489,6 +489,24 @@ test "literals" {
         .{ .source = "true", .expected = "true" },
         .{ .source = "false", .expected = "false" },
         .{ .source = "nil", .expected = "nil" },
+    };
+
+    for (tests) |t| {
+        const parsed = try testParse(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
+
+test "comparison" {
+    const gpa = std.testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{ .source = "1 > 2", .expected = "(1 > 2)" },
+        // TODO:
     };
 
     for (tests) |t| {

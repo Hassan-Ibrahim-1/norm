@@ -32,6 +32,15 @@ pub const OpCode = enum(u8) {
     // VM: Pop a constant off the stack and then push negated
     op_negate,
 
+    // Comparison operators
+    //
+    // VM: Pop two constants off the stack, compare them, and then push a boolean value
+    op_equal,
+    op_greater,
+    op_greater_equal,
+    op_less,
+    op_less_equal,
+
     // Nil value
     //
     // VM: Push nil on the stack
@@ -123,6 +132,11 @@ pub const Compiler = struct {
             .minus => c.emitOpCode(.op_subtract, line),
             .star => c.emitOpCode(.op_multiply, line),
             .slash => c.emitOpCode(.op_divide, line),
+            .equal_equal => c.emitOpCode(.op_equal, line),
+            .greater => c.emitOpCode(.op_greater, line),
+            .greater_equal => c.emitOpCode(.op_greater_equal, line),
+            .less => c.emitOpCode(.op_less, line),
+            .less_equal => c.emitOpCode(.op_less_equal, line),
             else => unreachable,
         }
     }
@@ -344,6 +358,12 @@ test "binary expression" {
             }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 }, .{ .float = 4.0 }, .{ .float = 2.0 } },
+        },
+        .{
+            .source = "2 < 3",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_less, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
         },
     };
 

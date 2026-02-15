@@ -118,6 +118,58 @@ pub const Vm = struct {
                 .op_false => vm.push(.{ .boolean = false }),
                 .op_nil => vm.push(.nil),
 
+                .op_equal => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    const value = switch (a) {
+                        .integer => a.integer == b.integer,
+                        .float => a.float == b.float,
+                        .boolean => a.boolean == b.boolean,
+                        .nil => true,
+                    };
+                    vm.push(.{ .boolean = value });
+                },
+                .op_greater => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    const value = switch (a) {
+                        .integer => a.integer > b.integer,
+                        .float => a.float > b.float,
+                        .boolean, .nil => unreachable,
+                    };
+                    vm.push(.{ .boolean = value });
+                },
+                .op_greater_equal => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    const value = switch (a) {
+                        .integer => a.integer >= b.integer,
+                        .float => a.float >= b.float,
+                        .boolean, .nil => unreachable,
+                    };
+                    vm.push(.{ .boolean = value });
+                },
+                .op_less => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    const value = switch (a) {
+                        .integer => a.integer < b.integer,
+                        .float => a.float < b.float,
+                        .boolean, .nil => unreachable,
+                    };
+                    vm.push(.{ .boolean = value });
+                },
+                .op_less_equal => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    const value = switch (a) {
+                        .integer => a.integer <= b.integer,
+                        .float => a.float <= b.float,
+                        .boolean, .nil => unreachable,
+                    };
+                    vm.push(.{ .boolean = value });
+                },
+
                 .op_return => {
                     return vm.pop();
                 },
