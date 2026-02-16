@@ -207,6 +207,8 @@ const Parser = struct {
                 .error_msg = "expected expression.",
                 .line = p.previous.line,
             });
+            // TODO: fix this, should not return undefined.
+            // maybe just some error/zero value for expression.
             return undefined;
         };
         var expr = prefix(p);
@@ -507,7 +509,8 @@ test "comparison" {
     } = &.{
         .{ .source = "1 > 2", .expected = "(1 > 2)" },
         .{ .source = "1 != 2", .expected = "(1 != 2)" },
-        // TODO:
+        .{ .source = "1 <= 2", .expected = "(1 <= 2)" },
+        .{ .source = "true == (2 < 1)", .expected = "(true == (2 < 1))" },
     };
 
     for (tests) |t| {
@@ -528,7 +531,10 @@ test "logical" {
         .{ .source = "true and true", .expected = "(true and true)" },
         .{ .source = "!false", .expected = "(!false)" },
         .{ .source = "!true", .expected = "(!true)" },
-        // TODO:
+        .{ .source = "!false or !true", .expected = "((!false) or (!true))" },
+        .{ .source = "!false and !true", .expected = "((!false) and (!true))" },
+        .{ .source = "2 < 1 and 2 > 1", .expected = "((2 < 1) and (2 > 1))" },
+        .{ .source = "true or 2 > 1", .expected = "(true or (2 > 1))" },
     };
 
     for (tests) |t| {
