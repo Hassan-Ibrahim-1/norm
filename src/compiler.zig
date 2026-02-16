@@ -95,9 +95,6 @@ pub const Chunk = struct {
             c.writeOp(gpa, .op_constant_long, line);
             const arr = c.code.addManyAsArray(gpa, 3) catch unreachable;
             mem.writeInt(u24, arr, @intCast(i), .little);
-            // c.write(gpa, @intCast(i & 0xff), line);
-            // c.write(gpa, @intCast((i >> 8) & 0xff), line);
-            // c.write(gpa, @intCast((i >> 16) & 0xff), line);
         }
     }
 

@@ -20,7 +20,7 @@ Think about how a garbage collector fits here.
 - [x] nil
 - [x] comparison operators
 - [x] logical operators (not, and, or)
-- [ ] Precedence tests for logical and comparison operators
+- [x] Precedence tests for logical and comparison operators
 - [ ] type checking for basic operations
 - [ ] How will basic types work (how should `true + false` be disallowed)
 compiler should also convert (1 + 2.0) to (1.0 + 2.0)
