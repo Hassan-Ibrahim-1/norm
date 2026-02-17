@@ -324,11 +324,17 @@ fn testRun(
 
     var ast = parser.parse(gpa, &l);
     defer ast.arena.deinit();
-
-    if (ast.errors.len > 0) {}
+    if (ast.errors.len > 0) {
+        debug.reportErrors(ast.errors, "test_runner", source);
+        return error.ParserFailed;
+    }
 
     var nir = sema.analyze(gpa, &ast);
     defer nir.arena.deinit();
+    if (nir.errors.len > 0) {
+        debug.reportErrors(nir.errors, "test_runner", source);
+        return error.SemaFailed;
+    }
 
     var chunk = compiler.compile(gpa, &nir);
     defer chunk.deinit(gpa);

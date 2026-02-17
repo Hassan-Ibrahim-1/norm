@@ -25,7 +25,7 @@ Think about how a garbage collector fits here.
 - [x] How will basic types work (how should `true + false` be disallowed)
 compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] cast syntax + cast operation
-- [ ] test casting
+- [x] test casting
 - [ ] sema auto casts in arithmetic
 - [ ] Think about reusing Ast stuff in Nir. There's a lot of duplicated code
 - [ ] strings + string interning for comparisons? look at go for inspiration
