@@ -96,6 +96,21 @@ pub const Diagnostics = struct {
     hints: []const []const u8 = &.{},
     notes: []const []const u8 = &.{},
     error_msg: []const u8,
+
+    pub fn promote(
+        d: *const Diagnostics,
+        file_name: []const u8,
+        source: []const u8,
+    ) ers.Diagnostics {
+        return .{
+            .error_msg = d.error_msg,
+            .line = d.line,
+            .notes = d.notes,
+            .hints = d.hints,
+            .file_name = file_name,
+            .source = source,
+        };
+    }
 };
 
 const Parser = struct {

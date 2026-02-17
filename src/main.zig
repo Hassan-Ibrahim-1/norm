@@ -76,7 +76,7 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
         var nir = sema.analyze(gpa, &ast);
         defer nir.arena.deinit();
 
-        var chunk = compiler.compile(gpa, &ast);
+        var chunk = compiler.compile(gpa, &nir);
         defer chunk.deinit(gpa);
 
         var vm = Vm.init(gpa, stdout, stderr);
