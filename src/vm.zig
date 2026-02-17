@@ -197,6 +197,15 @@ pub const Vm = struct {
                     vm.push(.{ .boolean = !a.boolean });
                 },
 
+                .op_cast_to_int => {
+                    const a = vm.pop();
+                    vm.push(.{ .integer = @intFromFloat(a.float) });
+                },
+                .op_cast_to_float => {
+                    const a = vm.pop();
+                    vm.push(.{ .float = @floatFromInt(a.integer) });
+                },
+
                 .op_return => {
                     return vm.pop();
                 },

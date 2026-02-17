@@ -2,10 +2,11 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const Io = std.Io;
-const ers = @import("errors.zig");
 const testing = std.testing;
 
 const debug = @import("debug.zig");
+const dbg = debug.dbg;
+const ers = @import("errors.zig");
 const Lexer = @import("Lexer.zig");
 const Token = Lexer.Token;
 
@@ -30,6 +31,20 @@ pub const Ast = struct {
 
         pub fn format(expr: *const Unary, w: *Io.Writer) Io.Writer.Error!void {
             try w.print("({s}{f})", .{ expr.operator.lexeme, expr.expr });
+        }
+    };
+
+    pub const Cast = struct {
+        target: Token,
+        expr: *Expr,
+
+        pub fn format(expr: *const Cast, w: *Io.Writer) Io.Writer.Error!void {
+            const target = switch (expr.target.type) {
+                .kw_float => "float",
+                .kw_int => "int",
+                else => unreachable,
+            };
+            try w.print("{s}({f})", .{ target, expr.expr });
         }
     };
 
@@ -72,6 +87,7 @@ pub const Ast = struct {
     pub const Expr = union(enum) {
         binary: Binary,
         unary: Unary,
+        cast: Cast,
         grouping: Grouping,
         literal: Literal,
 
@@ -80,6 +96,7 @@ pub const Ast = struct {
             try switch (expr.*) {
                 .binary => |b| w.print("{f}", .{b}),
                 .unary => |b| w.print("{f}", .{b}),
+                .cast => |b| w.print("{f}", .{b}),
                 .grouping => |b| w.print("{f}", .{b}),
                 .literal => |b| w.print("{f}", .{b}),
             };
@@ -197,6 +214,9 @@ const Parser = struct {
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _switch
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _enum
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // range
+        .{ .prefix = cast, .infix = null, .precedence = .lowest }, // kw_int
+        .{ .prefix = cast, .infix = null, .precedence = .lowest }, // kw_float
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_bool
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _error
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // eof,
     };
@@ -277,6 +297,16 @@ const Parser = struct {
         return makeLiteral(p.arena.allocator(), .{ .integer = value }, p.previous);
     }
 
+    fn cast(p: *Parser) *Ast.Expr {
+        const cast_target = p.previous;
+        p.consume(.left_paren, "Expect '(' before cast expression.");
+        p.next();
+        const expr = p.expression(.lowest);
+        p.consume(.right_paren, "Expect ')' after cast expression.");
+
+        return makeCast(p.arena.allocator(), expr, cast_target);
+    }
+
     fn boolean(p: *Parser) *Ast.Expr {
         const value = switch (p.previous.type) {
             .kw_true => true,
@@ -353,6 +383,12 @@ fn makeUnary(arena: Allocator, expr: *Ast.Expr, operator: Token) *Ast.Expr {
     return e;
 }
 
+fn makeCast(arena: Allocator, expr: *Ast.Expr, target: Token) *Ast.Expr {
+    const e = makeExpr(arena);
+    e.* = .{ .cast = .{ .expr = expr, .target = target } };
+    return e;
+}
+
 fn makeBinary(arena: Allocator, left: *Ast.Expr, operator: Token, right: *Ast.Expr) *Ast.Expr {
     const e = makeExpr(arena);
     e.* = .{ .binary = .{ .left = left, .operator = operator, .right = right } };
@@ -374,7 +410,7 @@ fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
     var ast = parse(gpa, &l);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
-        _ = debug.dbg("ast.errors", ast.errors);
+        _ = dbg("ast.errors", ast.errors);
         return error.ParserError;
     }
 
@@ -554,6 +590,23 @@ test "logical" {
         .{ .source = "!false and !true", .expected = "((!false) and (!true))" },
         .{ .source = "2 < 1 and 2 > 1", .expected = "((2 < 1) and (2 > 1))" },
         .{ .source = "true or 2 > 1", .expected = "(true or (2 > 1))" },
+    };
+
+    for (tests) |t| {
+        const parsed = try testParse(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
+
+test "cast" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{ .source = "float(2)", .expected = "float(2)" },
     };
 
     for (tests) |t| {

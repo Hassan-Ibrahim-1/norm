@@ -24,8 +24,10 @@ Think about how a garbage collector fits here.
 - [x] type checking for basic operations
 - [x] How will basic types work (how should `true + false` be disallowed)
 compiler should also convert (1 + 2.0) to (1.0 + 2.0)
-- [ ] cast syntax + cast operation
+- [x] cast syntax + cast operation
+- [ ] test casting
 - [ ] sema auto casts in arithmetic
+- [ ] Think about reusing Ast stuff in Nir. There's a lot of duplicated code
 - [ ] strings + string interning for comparisons? look at go for inspiration
 - [ ] global constant string table
 - [ ] think about garbage collection
@@ -78,6 +80,10 @@ main := fn () {
 read_all := fn () fmt.FileError!string {
     f := try fmt.open_file("file.txt", "r")
     return try f.read_all()
+}
+
+cast_to_float := fn (i: int) float {
+    return float(i)
 }
 
 index_of := fn (s: string, target: char) ?int {

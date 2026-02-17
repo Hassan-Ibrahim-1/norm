@@ -62,6 +62,9 @@ pub const Token = struct {
         kw_switch,
         kw_enum,
         kw_range,
+        kw_int,
+        kw_float,
+        kw_bool,
 
         _error,
         eof,
@@ -211,6 +214,7 @@ fn identifierType(l: *Lexer) Token.Type {
         'o' => l.checkKeyword(1, "r", .kw_or),
         'm' => l.checkKeyword(1, "ut", .kw_mut),
         's' => l.checkKeyword(1, "witch", .kw_switch),
+        'b' => l.checkKeyword(1, "ool", .kw_bool),
 
         'e' => if (l.current > l.start)
             switch (l.source[l.start + 1]) {
@@ -232,6 +236,7 @@ fn identifierType(l: *Lexer) Token.Type {
 
         'i' => if (l.current > l.start)
             switch (l.source[l.start + 1]) {
+                'n' => l.checkKeyword(2, "t", .kw_int),
                 'f' => .kw_if,
                 'm' => l.checkKeyword(2, "port", .kw_import),
                 else => .identifier,
@@ -241,6 +246,7 @@ fn identifierType(l: *Lexer) Token.Type {
 
         'f' => if (l.current > l.start)
             switch (l.source[l.start + 1]) {
+                'l' => l.checkKeyword(2, "oat", .kw_float),
                 'a' => l.checkKeyword(2, "lse", .kw_false),
                 'o' => l.checkKeyword(2, "r", .kw_for),
                 'n' => .kw_fn,
@@ -570,6 +576,15 @@ test "more tokens" {
                 testToken(")", .right_paren),
                 testToken(";", .semicolon),
                 testToken("}", .right_brace),
+                testToken("", .eof),
+            },
+        },
+        .{
+            .source = "int float bool",
+            .expected = &.{
+                testToken("int", .kw_int),
+                testToken("float", .kw_float),
+                testToken("bool", .kw_bool),
                 testToken("", .eof),
             },
         },

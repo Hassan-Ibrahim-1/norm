@@ -63,6 +63,20 @@ pub const Nir = struct {
         }
     };
 
+    pub const Cast = struct {
+        target: Token,
+        expr: *Expr,
+
+        pub fn format(expr: *const Cast, w: *Io.Writer) Io.Writer.Error!void {
+            const target = switch (expr.target.type) {
+                .kw_float => "float",
+                .kw_int => "int",
+                else => unreachable,
+            };
+            try w.print("{s}({f})", .{ target, expr.expr });
+        }
+    };
+
     pub const Literal = struct {
         pub const Value = union(enum) {
             integer: i32,
@@ -114,6 +128,7 @@ pub const Nir = struct {
         kind: union(enum) {
             binary: Binary,
             unary: Unary,
+            cast: Cast,
             grouping: Grouping,
             literal: Literal,
         },
@@ -127,6 +142,7 @@ pub const Nir = struct {
             return switch (e.kind) {
                 .binary => |*b| b.operator,
                 .unary => |*u| u.operator,
+                .cast => |*c| c.target,
                 .literal => |*l| l.token,
                 .grouping => |*g| g.paren,
             };
@@ -138,6 +154,7 @@ pub const Nir = struct {
                 // TODO: can probably shorten this with comptime
                 .binary => |b| w.print("{f}:{t}", .{ b, expr.type }),
                 .unary => |b| w.print("{f}:{t}", .{ b, expr.type }),
+                .cast => |b| w.print("{f}:{t}", .{ b, expr.type }),
                 .grouping => |b| w.print("{f}:{t}", .{ b, expr.type }),
                 .literal => |b| w.print("{f}:{t}", .{ b, expr.type }),
             };
@@ -159,6 +176,15 @@ fn makeUnary(arena: Allocator, expr: *Nir.Expr, op: Token, ty: NormType) *Nir.Ex
     const e = makeExpr(arena);
     e.* = .{
         .kind = .{ .unary = .{ .expr = expr, .operator = op } },
+        .type = ty,
+    };
+    return e;
+}
+
+fn makeCast(arena: Allocator, expr: *Nir.Expr, target: Token, ty: NormType) *Nir.Expr {
+    const e = makeExpr(arena);
+    e.* = .{
+        .kind = .{ .cast = .{ .expr = expr, .target = target } },
         .type = ty,
     };
     return e;
@@ -210,6 +236,7 @@ const Sema = struct {
         return switch (expr.*) {
             .binary => |*b| s.binary(b),
             .unary => |*u| s.unary(u),
+            .cast => |*c| s.cast(c),
             .grouping => |*g| s.grouping(g),
             .literal => |*l| s.literal(l),
         };
@@ -283,6 +310,27 @@ const Sema = struct {
             },
             else => unreachable,
         }
+    }
+
+    fn cast(s: *Sema, c: *Ast.Cast) *Nir.Expr {
+        const arena = s.arena.allocator();
+
+        const expr = s.expression(c.expr);
+        if (expr.type == .n_invalid) return makeInvalid(arena);
+
+        const target_type: NormType = switch (c.target.type) {
+            .kw_float => if (!s.expectType(expr, .n_int, "Cannot cast {t} to float, expected int", .{expr.type}))
+                return makeInvalid(arena)
+            else
+                .n_float,
+            .kw_int => if (!s.expectType(expr, .n_float, "Cannot cast {t} to int, expected float", .{expr.type}))
+                return makeInvalid(arena)
+            else
+                .n_int,
+            else => unreachable,
+        };
+
+        return makeCast(arena, expr, c.target, target_type);
     }
 
     fn grouping(s: *Sema, g: *Ast.Grouping) *Nir.Expr {

@@ -60,6 +60,12 @@ pub const OpCode = enum(u8) {
     // VM: Push nil on the stack
     op_nil,
 
+    // Casting operators
+    //
+    // VM: Pop a constant off the stack and convert it to target type
+    op_cast_to_int,
+    op_cast_to_float,
+
     // Temporary: Signals end of execution
     op_return,
 
@@ -132,6 +138,7 @@ pub const Compiler = struct {
         switch (expr.kind) {
             .binary => |*b| c.binary(b),
             .unary => |*u| c.unary(u),
+            .cast => |*ca| c.cast(ca),
             .grouping => |*g| c.grouping(g),
             .literal => |*l| c.literal(l),
         }
@@ -142,21 +149,22 @@ pub const Compiler = struct {
         c.expression(b.right);
 
         const line = b.operator.line;
-        switch (b.operator.type) {
-            .plus => c.emitOpCode(.op_add, line),
-            .minus => c.emitOpCode(.op_subtract, line),
-            .star => c.emitOpCode(.op_multiply, line),
-            .slash => c.emitOpCode(.op_divide, line),
-            .equal_equal => c.emitOpCode(.op_equal, line),
-            .bang_equal => c.emitOpCode(.op_not_equal, line),
-            .greater => c.emitOpCode(.op_greater, line),
-            .greater_equal => c.emitOpCode(.op_greater_equal, line),
-            .less => c.emitOpCode(.op_less, line),
-            .less_equal => c.emitOpCode(.op_less_equal, line),
-            .kw_and => c.emitOpCode(.op_and, line),
-            .kw_or => c.emitOpCode(.op_or, line),
+        const op_code: OpCode = switch (b.operator.type) {
+            .plus => .op_add,
+            .minus => .op_subtract,
+            .star => .op_multiply,
+            .slash => .op_divide,
+            .equal_equal => .op_equal,
+            .bang_equal => .op_not_equal,
+            .greater => .op_greater,
+            .greater_equal => .op_greater_equal,
+            .less => .op_less,
+            .less_equal => .op_less_equal,
+            .kw_and => .op_and,
+            .kw_or => .op_or,
             else => unreachable,
-        }
+        };
+        c.emitOpCode(op_code, line);
     }
 
     fn unary(c: *Compiler, u: *Nir.Unary) void {
@@ -167,6 +175,17 @@ pub const Compiler = struct {
             .bang => c.emitOpCode(.op_not, line),
             else => unreachable,
         }
+    }
+
+    fn cast(c: *Compiler, cst: *Nir.Cast) void {
+        c.expression(cst.expr);
+        const line = cst.target.line;
+        const op_code: OpCode = switch (cst.target.type) {
+            .kw_int => .op_cast_to_int,
+            .kw_float => .op_cast_to_float,
+            else => unreachable,
+        };
+        c.emitOpCode(op_code, line);
     }
 
     fn grouping(c: *Compiler, g: *Nir.Grouping) void {
