@@ -21,9 +21,11 @@ Think about how a garbage collector fits here.
 - [x] comparison operators
 - [x] logical operators (not, and, or)
 - [x] Precedence tests for logical and comparison operators
-- [ ] type checking for basic operations
-- [ ] How will basic types work (how should `true + false` be disallowed)
+- [x] type checking for basic operations
+- [x] How will basic types work (how should `true + false` be disallowed)
 compiler should also convert (1 + 2.0) to (1.0 + 2.0)
+- [ ] cast syntax + cast operation
+- [ ] sema auto casts in arithmetic
 - [ ] strings + string interning for comparisons? look at go for inspiration
 - [ ] global constant string table
 - [ ] think about garbage collection
