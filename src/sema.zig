@@ -155,7 +155,7 @@ pub const Nir = struct {
         pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
             // _ = debug.dbgw(w, "", expr);
             try switch (expr.kind) {
-                .literal => |l| w.print("{f}", .{l}),
+                inline .cast, .literal => |l| w.print("{f}", .{l}),
                 inline else => |b| w.print("{f}:{f}", .{ b, expr.type }),
             };
         }
@@ -188,6 +188,16 @@ fn makeCast(arena: Allocator, expr: *Nir.Expr, target: Token, ty: NormType) *Nir
         .type = ty,
     };
     return e;
+}
+
+fn makeAnonCast(arena: Allocator, expr: *Nir.Expr, target: Token.Type, ty: NormType) *Nir.Expr {
+    const expr_token = expr.token();
+    const target_token: Token = .{
+        .type = target,
+        .lexeme = expr_token.lexeme,
+        .line = expr_token.line,
+    };
+    return makeCast(arena, expr, target_token, ty);
 }
 
 fn makeBinary(arena: Allocator, left: *Nir.Expr, op: Token, right: *Nir.Expr, ty: NormType) *Nir.Expr {
@@ -249,17 +259,8 @@ const Sema = struct {
 
         switch (b.operator.type) {
             .plus, .minus, .star, .slash => {
-                // TODO: casting
-                if (left.type != right.type) {
-                    s.reportError(left, "{f} {s} {f} is not a valid operation", .{
-                        left.type,
-                        b.operator.lexeme,
-                        right.type,
-                    });
-                    return makeInvalid(arena);
-                }
                 if (!s.expectTypes(
-                    left,
+                    right,
                     NormType.number_types,
                     "{f} {s} {f} is not a valid operation",
                     .{ left.type, b.operator.lexeme, right.type },
@@ -267,26 +268,41 @@ const Sema = struct {
                     return makeInvalid(arena);
                 }
 
-                return makeBinary(arena, left, b.operator, right, left.type);
+                switch (left.type) {
+                    .n_float => if (right.type == .n_int) {
+                        const float_right = makeAnonCast(arena, right, .kw_float, .n_float);
+                        return makeBinary(arena, left, b.operator, float_right, .n_float);
+                    },
+                    .n_int => if (right.type == .n_float) {
+                        const float_left = makeAnonCast(arena, left, .kw_float, .n_float);
+                        return makeBinary(arena, float_left, b.operator, right, .n_float);
+                    },
+                    else => return s.reportErrorInv(
+                        left,
+                        "{f} {s} {f} is not a valid operation",
+                        .{ left.type, b.operator.lexeme, right.type },
+                    ),
+                }
+
+                const expr_type: NormType = if (b.operator.type == .slash) .n_float else left.type;
+                return makeBinary(arena, left, b.operator, right, expr_type);
             },
+
             .equal_equal, .bang_equal => {
                 if (left.type != right.type) {
-                    s.reportError(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
-                    return makeInvalid(arena);
+                    return s.reportErrorInv(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
                 }
                 return makeBinary(arena, left, b.operator, right, .n_bool);
             },
             .greater, .greater_equal, .less, .less_equal => {
                 if (left.type != right.type or !checkTypes(left, NormType.number_types)) {
-                    s.reportError(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
-                    return makeInvalid(arena);
+                    return s.reportErrorInv(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
                 }
                 return makeBinary(arena, left, b.operator, right, .n_bool);
             },
             .kw_and, .kw_or => {
                 if (left.type != right.type or left.type != .n_bool) {
-                    s.reportError(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
-                    return makeInvalid(arena);
+                    return s.reportErrorInv(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
                 }
                 return makeBinary(arena, left, b.operator, right, .n_bool);
             },
@@ -373,6 +389,19 @@ const Sema = struct {
         return false;
     }
 
+    fn expectTypesEx(
+        s: *Sema,
+        left: *Nir.Expr,
+        right: *Nir.Expr,
+        comptime types: []const NormType,
+        comptime error_msg: []const u8,
+        args: anytype,
+    ) bool {
+        if (checkTypes(left, types) and checkTypes(right, types)) return true;
+        s.reportError(left, error_msg, args);
+        return false;
+    }
+
     fn checkTypes(expr: *Nir.Expr, comptime types: []const NormType) bool {
         for (types) |ty|
             if (expr.type == ty) return true;
@@ -390,6 +419,11 @@ const Sema = struct {
         if (s.panic_mode) return;
         s.errors.append(s.arena.allocator(), s.diag(expr, error_msg, args)) catch oom();
         s.panic_mode = true;
+    }
+
+    fn reportErrorInv(s: *Sema, expr: *Nir.Expr, comptime error_msg: []const u8, args: anytype) *Nir.Expr {
+        s.reportError(expr, error_msg, args);
+        return makeInvalid(s.arena.allocator());
     }
 };
 
@@ -447,6 +481,7 @@ fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
     }
 
     const nir = analyze(gpa, &ast);
+    errdefer nir.arena.deinit();
     if (nir.errors.len == 0) {
         std.debug.print("sema passed with output=\"{f}\"\n", .{nir.expr});
         return error.SemaPassed;
@@ -455,6 +490,27 @@ fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
 }
 
 const testing = std.testing;
+
+test "arithmetic" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{ .source = "2 + 2", .expected = "(2 + 2):int" },
+        .{ .source = "2 / 2", .expected = "(2 / 2):float" },
+        .{ .source = "-2", .expected = "(-2):int" },
+        .{ .source = "-2", .expected = "(-2):int" },
+        .{ .source = "2 * 3 + 4", .expected = "((2 * 3):int + 4):int" },
+        .{ .source = "9.0 / 3.0 * 32.0", .expected = "((9.000 / 3.000):float * 32.000):float" },
+    };
+
+    for (tests) |t| {
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
 
 test "arithmetic failure" {
     const gpa = testing.allocator;
@@ -476,26 +532,6 @@ test "arithmetic failure" {
 
         try testing.expect(nir.errors.len == 1);
         try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
-    }
-}
-
-test "arithmetic" {
-    const gpa = testing.allocator;
-    const tests: []const struct {
-        source: []const u8,
-        expected: []const u8,
-    } = &.{
-        .{ .source = "2 + 2", .expected = "(2 + 2):int" },
-        .{ .source = "-2", .expected = "(-2):int" },
-        .{ .source = "-2", .expected = "(-2):int" },
-        .{ .source = "2 * 3 + 4", .expected = "((2 * 3):int + 4):int" },
-        .{ .source = "9.0 / 3.0 * 32.0", .expected = "((9.000 / 3.000):float * 32.000):float" },
-    };
-
-    for (tests) |t| {
-        const actual = try testAnalyze(gpa, t.source);
-        defer gpa.free(actual);
-        try testing.expectEqualStrings(t.expected, actual);
     }
 }
 
@@ -586,5 +622,43 @@ test "logical failure" {
 
         try testing.expect(nir.errors.len == 1);
         try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
+    }
+}
+
+test "casting" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{ .source = "float(2)", .expected = "float(2)" },
+        .{ .source = "int(2.0)", .expected = "int(2.000)" },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "auto casting" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{ .source = "2 + 3.0", .expected = "(float(2) + 3.000):float" },
+        .{ .source = "3.0 * 4", .expected = "(3.000 * float(4)):float" },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
     }
 }

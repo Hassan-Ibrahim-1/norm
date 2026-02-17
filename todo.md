@@ -27,7 +27,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] cast syntax + cast operation
 - [x] test casting
 - [x] test failures in sema
-- [ ] sema auto casts in arithmetic
+- [x] sema auto casts in arithmetic
 - [ ] Think about reusing Ast stuff in Nir. There's a lot of duplicated code
 - [ ] strings + string interning for comparisons? look at go for inspiration
 - [ ] global constant string table

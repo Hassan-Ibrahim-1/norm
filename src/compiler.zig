@@ -373,30 +373,6 @@ test "arithmetic expressions" {
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .float = 2 }, .{ .float = 3 } },
         },
-        // .{
-        //     .source = "2 + 3.0",
-        //     .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_add, .op_return }),
-        //     .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
-        //     .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 } },
-        // },
-        // .{
-        //     .source = "2 * 3.0",
-        //     .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_multiply, .op_return }),
-        //     .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
-        //     .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 } },
-        // },
-        // .{
-        //     .source = "2 / 3.0",
-        //     .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_divide, .op_return }),
-        //     .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
-        //     .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 } },
-        // },
-        // .{
-        //     .source = "2 - 3.0",
-        //     .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_subtract, .op_return }),
-        //     .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
-        //     .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 } },
-        // },
         .{
             .source = "(2.0 + 3.0) - 4.0 / 2.0",
             .expected_code = &debug.opCodeToBytes(&.{
@@ -415,6 +391,40 @@ test "arithmetic expressions" {
             }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .float = 2.0 }, .{ .float = 3 }, .{ .float = 4.0 }, .{ .float = 2.0 } },
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit(gpa);
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
+        try testing.expectEqualSlices(Value, t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "auto cast arithmetic expressions" {
+    const gpa = testing.allocator;
+    const tests: []const CompilerTestCase = &.{
+        .{
+            .source = "2 + 3.0",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_cast_to_float, .op_constant, 1, .op_add, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 } },
+        },
+        .{
+            .source = "2 * 3.0",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_cast_to_float, .op_constant, 1, .op_multiply, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 } },
+        },
+        .{
+            .source = "2.0 / 3",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_cast_to_float, .op_divide, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{ .{ .float = 2 }, .{ .integer = 3 } },
         },
     };
 

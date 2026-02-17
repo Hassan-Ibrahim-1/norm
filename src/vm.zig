@@ -85,24 +85,40 @@ pub const Vm = struct {
                 .op_add => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    vm.push(valueAdd(a, b));
+                    if (a == .integer) {
+                        vm.push(.{ .integer = a.integer + b.integer });
+                    } else {
+                        vm.push(.{ .float = a.float + b.float });
+                    }
                 },
 
                 .op_subtract => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    vm.push(valueSubtract(a, b));
+                    if (a == .integer) {
+                        vm.push(.{ .integer = a.integer - b.integer });
+                    } else {
+                        vm.push(.{ .float = a.float - b.float });
+                    }
                 },
 
                 .op_multiply => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    vm.push(valueMultiply(a, b));
+                    if (a == .integer) {
+                        vm.push(.{ .integer = a.integer * b.integer });
+                    } else {
+                        vm.push(.{ .float = a.float * b.float });
+                    }
                 },
                 .op_divide => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    vm.push(valueDivide(a, b));
+                    if (a == .integer) {
+                        vm.push(.{ .float = as(f32, a.integer) / as(f32, b.integer) });
+                    } else {
+                        vm.push(.{ .float = a.float / b.float });
+                    }
                 },
 
                 .op_negate => {
@@ -254,66 +270,6 @@ pub const Vm = struct {
 
 const cast = @import("cast.zig");
 
-fn valueAdd(a: Value, b: Value) Value {
-    return switch (a) {
-        .float => |af| if (b == .integer)
-            .{ .float = af + cast.as(f64, b.integer) }
-        else
-            .{ .float = af + b.float },
-
-        .integer => |ai| if (b == .integer)
-            .{ .integer = ai + b.integer }
-        else
-            .{ .float = cast.as(f64, ai) + b.float },
-        else => unreachable,
-    };
-}
-
-fn valueSubtract(a: Value, b: Value) Value {
-    return switch (a) {
-        .float => |af| if (b == .integer)
-            .{ .float = af - cast.as(f64, b.integer) }
-        else
-            .{ .float = af - b.float },
-
-        .integer => |ai| if (b == .integer)
-            .{ .integer = ai - b.integer }
-        else
-            .{ .float = cast.as(f64, ai) - b.float },
-        else => unreachable,
-    };
-}
-
-fn valueMultiply(a: Value, b: Value) Value {
-    return switch (a) {
-        .float => |af| if (b == .integer)
-            .{ .float = af * cast.as(f64, b.integer) }
-        else
-            .{ .float = af * b.float },
-
-        .integer => |ai| if (b == .integer)
-            .{ .integer = ai * b.integer }
-        else
-            .{ .float = cast.as(f64, ai) * b.float },
-        else => unreachable,
-    };
-}
-
-fn valueDivide(a: Value, b: Value) Value {
-    return switch (a) {
-        .float => |af| if (b == .integer)
-            .{ .float = af / cast.as(f64, b.integer) }
-        else
-            .{ .float = af / b.float },
-
-        .integer => |ai| if (b == .integer)
-            .{ .float = cast.as(f64, ai) / cast.as(f64, b.integer) }
-        else
-            .{ .float = cast.as(f64, ai) / b.float },
-        else => unreachable,
-    };
-}
-
 fn testRun(
     gpa: Allocator,
     source: []const u8,
@@ -368,6 +324,8 @@ test "literals" {
     }
 }
 
+const as = cast.as;
+
 test "arithmetic" {
     const gpa = testing.allocator;
     var discarding: Io.Writer.Discarding = .init(&.{});
@@ -381,10 +339,14 @@ test "arithmetic" {
         .{ .source = "2 + 3", .expected = .{ .integer = 5 } },
         .{ .source = "2 - 3", .expected = .{ .integer = -1 } },
         .{ .source = "2 * 3", .expected = .{ .integer = 6 } },
-        .{ .source = "2 / 3", .expected = .{ .float = 2.0 / 3.0 } },
+        .{ .source = "2 / 3", .expected = .{ .float = as(f32, 2) / as(f32, 3) } },
         .{ .source = "(2 + 1) / 3", .expected = .{ .float = 1.0 } },
         .{ .source = "-2", .expected = .{ .integer = -2 } },
         .{ .source = "-(2 * 3)", .expected = .{ .integer = -6 } },
+        .{ .source = "1.0 + 2.0", .expected = .{ .float = 3.0 } },
+        .{ .source = "1.0 - 2.0", .expected = .{ .float = -1.0 } },
+        .{ .source = "1 + 2.0", .expected = .{ .float = 3.0 } },
+        .{ .source = "3.0 - 1", .expected = .{ .float = 2.0 } },
     };
 
     for (tests) |t| {
