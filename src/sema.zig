@@ -436,7 +436,48 @@ fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
     return aw.toOwnedSlice();
 }
 
+fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
+    var l = Lexer.init(source);
+
+    var ast = parser.parse(gpa, &l);
+    defer ast.arena.deinit();
+    if (ast.errors.len > 0) {
+        debug.reportErrors(ast.errors, "test_runner", source);
+        return error.ParserFailed;
+    }
+
+    const nir = analyze(gpa, &ast);
+    if (nir.errors.len == 0) {
+        std.debug.print("sema passed with output=\"{f}\"\n", .{nir.expr});
+        return error.SemaPassed;
+    }
+    return nir;
+}
+
 const testing = std.testing;
+
+test "arithmetic failure" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{ .source = "1 + true", .error_msg = "int + bool is not a valid operation" },
+        .{ .source = "1.0 + true", .error_msg = "float + bool is not a valid operation" },
+        .{ .source = "true + 1.0", .error_msg = "bool + float is not a valid operation" },
+        .{ .source = "false + 2", .error_msg = "bool + int is not a valid operation" },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        const nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.arena.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
+    }
+}
 
 test "arithmetic" {
     const gpa = testing.allocator;
@@ -468,12 +509,39 @@ test "comparison" {
         .{ .source = "3 <= 2", .expected = "(3 <= 2):bool" },
         .{ .source = "1 == 1", .expected = "(1 == 1):bool" },
         .{ .source = "1 != 2", .expected = "(1 != 2):bool" },
+        .{ .source = "true == true", .expected = "(true == true):bool" },
+        .{ .source = "true != false", .expected = "(true != false):bool" },
     };
 
     for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "comparison failure" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{ .source = "true > false", .error_msg = "Cannot compare bool and bool." },
+        .{ .source = "true == 1", .error_msg = "Cannot compare bool and int." },
+        .{ .source = "true != 2", .error_msg = "Cannot compare bool and int." },
+        .{ .source = "2 < false", .error_msg = "Cannot compare int and bool." },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        const nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.arena.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
     }
 }
 
@@ -489,8 +557,34 @@ test "logical" {
     };
 
     for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "logical failure" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{ .source = "true and 1", .error_msg = "Cannot compare bool and int." },
+        .{ .source = "1 or true", .error_msg = "Cannot compare int and bool." },
+        .{ .source = "1 and 1", .error_msg = "Cannot compare int and int." },
+        .{ .source = "!1", .error_msg = "! only supports bools" },
+        .{ .source = "!1.0", .error_msg = "! only supports bools" },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        const nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.arena.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
     }
 }
