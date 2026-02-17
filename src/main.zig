@@ -50,8 +50,12 @@ fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Wri
 fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.File) !void {
     while (true) {
         var line_buf: [1000]u8 = undefined;
-        _ = try stdout.write("> ");
+        _ = try stdout.writeAll("> ");
         try stdout.flush();
+        defer {
+            stderr.flush() catch unreachable;
+            stdout.flush() catch unreachable;
+        }
 
         const len = try stdin.read(&line_buf);
         if (len == 0) {
@@ -68,13 +72,18 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
             for (ast.errors) |diag| {
                 try stderr.print("{s}\n", .{diag.error_msg});
             }
-            try stderr.flush();
             continue;
         }
-        try stdout.print("[parser]: {f}\n", .{ast.expr});
 
         var nir = sema.analyze(gpa, &ast);
         defer nir.arena.deinit();
+        if (nir.errors.len > 0) {
+            for (nir.errors) |diag| {
+                try stderr.print("{s}\n", .{diag.error_msg});
+            }
+            continue;
+        }
+        try stderr.print("[sema]: {f}\n", .{nir.expr});
 
         var chunk = compiler.compile(gpa, &nir);
         defer chunk.deinit(gpa);

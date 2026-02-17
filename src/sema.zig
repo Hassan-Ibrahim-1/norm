@@ -134,12 +134,12 @@ pub const Nir = struct {
 
         pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
             // _ = debug.dbgw(w, "", expr);
-            try switch (expr.*) {
+            try switch (expr.kind) {
                 // TODO: can probably shorten this with comptime
-                .binary => |b| w.print("{f} -> {t}", .{ b, expr.type }),
-                .unary => |b| w.print("{f} -> {t}", .{ b, expr.type }),
-                .grouping => |b| w.print("{f} -> {t}", .{ b, expr.type }),
-                .literal => |b| w.print("{f} -> {t}", .{ b, expr.type }),
+                .binary => |b| w.print("{f}:{t}", .{ b, expr.type }),
+                .unary => |b| w.print("{f}:{t}", .{ b, expr.type }),
+                .grouping => |b| w.print("{f}:{t}", .{ b, expr.type }),
+                .literal => |b| w.print("{f}:{t}", .{ b, expr.type }),
             };
         }
     };
