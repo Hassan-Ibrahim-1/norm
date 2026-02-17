@@ -275,6 +275,7 @@ test "basic chunk ops" {
     try testing.expectEqualSlices(Value, &expected_constants, chunk.constants.items);
 }
 
+// TODO:
 test "chunk long instruction" {}
 
 const Lexer = @import("Lexer.zig");
@@ -289,20 +290,16 @@ fn testCompile(gpa: Allocator, source: []const u8) !Chunk {
     defer ast.arena.deinit();
 
     if (ast.errors.len > 0) {
-        const stderr = std.debug.lockStderrWriter(&.{});
-        for (ast.errors) |diag| {
-            try ers.reportError(stderr, &diag.promote("test_runner", source));
-        }
+        debug.reportErrors(ast.errors, "test_runner", source);
+        return error.ParserFailed;
     }
 
     var nir = sema.analyze(gpa, &ast);
     defer nir.arena.deinit();
 
     if (nir.errors.len > 0) {
-        const stderr = std.debug.lockStderrWriter(&.{});
-        for (nir.errors) |diag| {
-            try ers.reportError(stderr, &diag.promote("test_runner", source));
-        }
+        debug.reportErrors(nir.errors, "test_runner", source);
+        return error.SemaFailed;
     }
 
     return compile(gpa, &nir);
@@ -505,6 +502,34 @@ test "logical" {
             .expected_code = &debug.opCodeToBytes(&.{ .op_false, .op_not, .op_return }),
             .expected_lines = &.{ 1, 1, 0 },
             .expected_constants = &.{},
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit(gpa);
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
+        try testing.expectEqualSlices(Value, t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "casting" {
+    const gpa = testing.allocator;
+    const tests: []const CompilerTestCase = &.{
+        .{
+            .source = "float(2)",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_cast_to_float, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 0 },
+            .expected_constants = &.{.{ .integer = 2 }},
+        },
+        .{
+            .source = "int(2.0)",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_cast_to_int, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 0 },
+            .expected_constants = &.{.{ .float = 2.0 }},
         },
     };
 

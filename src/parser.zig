@@ -94,11 +94,7 @@ pub const Ast = struct {
         pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
             // _ = debug.dbgw(w, "", expr);
             try switch (expr.*) {
-                .binary => |b| w.print("{f}", .{b}),
-                .unary => |b| w.print("{f}", .{b}),
-                .cast => |b| w.print("{f}", .{b}),
-                .grouping => |b| w.print("{f}", .{b}),
-                .literal => |b| w.print("{f}", .{b}),
+                inline else => |b| w.print("{f}", .{b}),
             };
         }
     };
@@ -599,7 +595,7 @@ test "logical" {
     }
 }
 
-test "cast" {
+test "casting" {
     const gpa = testing.allocator;
 
     const tests: []const struct {
@@ -607,6 +603,7 @@ test "cast" {
         expected: []const u8,
     } = &.{
         .{ .source = "float(2)", .expected = "float(2)" },
+        .{ .source = "int(2)", .expected = "int(2)" },
     };
 
     for (tests) |t| {

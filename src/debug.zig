@@ -146,3 +146,11 @@ pub fn opCodeToBytes(comptime ops: anytype) [ops.len]u8 {
     }
     return bytes;
 }
+
+const ers = @import("errors.zig");
+pub fn reportErrors(errors: anytype, file_name: []const u8, source: []const u8) void {
+    const stderr = std.debug.lockStderrWriter(&.{});
+    for (errors) |diag| {
+        ers.reportError(stderr, &diag.promote(file_name, source)) catch unreachable;
+    }
+}

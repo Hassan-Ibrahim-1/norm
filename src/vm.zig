@@ -446,3 +446,23 @@ test "logical" {
         try testing.expectEqual(t.expected, value);
     }
 }
+
+test "casting" {
+    const gpa = testing.allocator;
+    var discarding: Io.Writer.Discarding = .init(&.{});
+    const w = &discarding.writer;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{
+        .{ .source = "float(2)", .expected = .{ .float = 2.0 } },
+        .{ .source = "int(2.0)", .expected = .{ .integer = 2 } },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const value = try testRun(gpa, t.source, w, w);
+        try testing.expectEqual(t.expected, value);
+    }
+}
