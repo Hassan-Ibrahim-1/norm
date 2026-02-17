@@ -32,8 +32,12 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [ ] Think about debug info, instead of each chunk having line numbers there
 could be pointers to a debug info table. Would allow variable/function names, types etc.
 - [ ] what now? booleans, strings, variables, functions, closures, structs, types
+- [ ] consider adding making specific instructions for each type. right now op_add et al have to deal
+with both floats and integers
 
 #### Notes for next session
+
+Each pass should take ownership over the last IR
 
 There should be a constant string table like how compiled languages do it. No
 need for extra allocations.

@@ -9,6 +9,10 @@ const debug = @import("debug.zig");
 const Lexer = @import("Lexer.zig");
 const Token = Lexer.Token;
 
+fn oom() noreturn {
+    @panic("oom");
+}
+
 pub const Ast = struct {
     pub const Binary = struct {
         left: *Expr,
@@ -305,7 +309,7 @@ const Parser = struct {
 
     fn reportError(p: *Parser, diag: Diagnostics) void {
         if (p.panic_mode) return;
-        p.errors.append(p.arena.allocator(), diag) catch unreachable;
+        p.errors.append(p.arena.allocator(), diag) catch oom();
         p.panic_mode = true;
     }
 };
@@ -314,7 +318,7 @@ const Parser = struct {
 pub fn parse(gpa: Allocator, l: *Lexer) Ast {
     var p = Parser.init(gpa, l);
     const expr = p.expression(.lowest);
-    const errors = p.errors.toOwnedSlice(p.arena.allocator()) catch unreachable;
+    const errors = p.errors.toOwnedSlice(p.arena.allocator()) catch oom();
     return .{
         .arena = p.arena,
         .errors = errors,
@@ -347,7 +351,7 @@ fn makeLiteral(arena: Allocator, value: Ast.Literal.Value, token: Token) *Ast.Ex
 }
 
 fn makeExpr(arena: Allocator) *Ast.Expr {
-    return arena.create(Ast.Expr) catch unreachable;
+    return arena.create(Ast.Expr) catch oom();
 }
 
 fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {

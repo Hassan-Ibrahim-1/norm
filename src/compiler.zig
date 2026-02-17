@@ -66,6 +66,10 @@ pub const OpCode = enum(u8) {
     }
 };
 
+fn oom() noreturn {
+    @panic("oom");
+}
+
 pub const Chunk = struct {
     code: std.ArrayList(u8),
     lines: std.ArrayList(u32),
@@ -78,8 +82,8 @@ pub const Chunk = struct {
     };
 
     pub fn write(c: *Chunk, gpa: Allocator, b: u8, line: u32) void {
-        c.code.append(gpa, b) catch unreachable;
-        c.lines.append(gpa, line) catch unreachable;
+        c.code.append(gpa, b) catch oom();
+        c.lines.append(gpa, line) catch oom();
     }
 
     pub fn writeOp(c: *Chunk, gpa: Allocator, op: OpCode, line: u32) void {
@@ -93,13 +97,13 @@ pub const Chunk = struct {
             c.write(gpa, @intCast(i), line);
         } else {
             c.writeOp(gpa, .op_constant_long, line);
-            const arr = c.code.addManyAsArray(gpa, 3) catch unreachable;
+            const arr = c.code.addManyAsArray(gpa, 3) catch oom();
             mem.writeInt(u24, arr, @intCast(i), .little);
         }
     }
 
     fn addConstant(c: *Chunk, gpa: Allocator, value: Value) usize {
-        c.constants.append(gpa, value) catch unreachable;
+        c.constants.append(gpa, value) catch oom();
         return c.constants.items.len - 1;
     }
 
