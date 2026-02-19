@@ -315,7 +315,7 @@ const Sema = struct {
         const expr = s.expression(u.expr);
         switch (u.operator.type) {
             .minus => {
-                if (!s.expectTypes(expr, NormType.number_types, "Cannot negate {t}", .{expr.type}))
+                if (!s.expectTypes(expr, NormType.number_types, "Cannot negate {f}", .{expr.type}))
                     return makeInvalid(arena);
                 return makeUnary(arena, expr, u.operator, expr.type);
             },
