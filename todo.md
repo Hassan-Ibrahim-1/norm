@@ -34,6 +34,12 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
     * how do i handle multiple integer types?
     * how do i handle casting?
     * traits? interfaces?
+    * i think the stack should also change. there's no need for a Value type at runtime. just
+    have an array of bytes to index into and opcodes define how many bytes you need and what to do with them.
+    there should be no types at runtime whatsoever. maybe have specialized opcodes for reading bytes and have registers?
+    this would probably make various number types easier to deal with i think?
+    * https://mukulrathi.com/create-your-own-programming-language/intro-to-type-checking/
+    * https://blog.polybdenum.com/2020/07/04/subtype-inference-by-example-part-1-introducing-cubiml.html
 - [ ] Think about reusing Ast stuff in Nir. There's a lot of duplicated code
 - [ ] strings + string interning for comparisons? look at go for inspiration
 - [ ] global constant string table
