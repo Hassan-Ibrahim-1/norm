@@ -129,7 +129,7 @@ pub fn dbg(prefix: []const u8, value: anytype) @TypeOf(value) {
 const trait = @import("trait.zig");
 const fmt = std.fmt;
 
-pub fn opCodeToBytes(comptime ops: anytype) [ops.len]u8 {
+pub fn opCodeToBytes(ops: anytype) [ops.len]u8 {
     var bytes: [ops.len]u8 = undefined;
     inline for (ops, 0..) |op, i| {
         const T = @TypeOf(op);

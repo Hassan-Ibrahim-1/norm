@@ -28,10 +28,17 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] test casting
 - [x] test failures in sema
 - [x] sema auto casts in arithmetic
+- [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
+    * whats an elegant way of determining types, i just use a lot of if statements right now.
+    * how do i handle user defined types? right now im just thinking of interning them
+    * how do i handle multiple integer types?
+    * how do i handle casting?
+    * traits? interfaces?
 - [ ] Think about reusing Ast stuff in Nir. There's a lot of duplicated code
 - [ ] strings + string interning for comparisons? look at go for inspiration
 - [ ] global constant string table
 - [ ] think about garbage collection
+- [ ] look at other type checking implementations, mine is unreadable and naive.
 - [ ] variable declartions + expressions
 - [ ] variable mutability + assignment
 - [ ] Think about debug info, instead of each chunk having line numbers there

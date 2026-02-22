@@ -254,7 +254,7 @@ const testing = std.testing;
 const debug = @import("debug.zig");
 
 test "basic chunk ops" {
-    const gpa = std.testing.allocator;
+    const gpa = testing.allocator;
     var chunk: Chunk = .empty;
     defer chunk.deinit(gpa);
 
@@ -313,7 +313,7 @@ const CompilerTestCase = struct {
 };
 
 test "literals" {
-    const gpa = std.testing.allocator;
+    const gpa = testing.allocator;
     const tests: []const CompilerTestCase = &.{
         .{
             .source = "2",
@@ -359,7 +359,7 @@ test "literals" {
 }
 
 test "arithmetic expressions" {
-    const gpa = std.testing.allocator;
+    const gpa = testing.allocator;
     const tests: []const CompilerTestCase = &.{
         .{
             .source = "2 + 3",
