@@ -49,6 +49,9 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [ ] variable mutability + assignment
 - [ ] Think about debug info, instead of each chunk having line numbers there
 could be pointers to a debug info table. Would allow variable/function names, types etc.
+- [ ] if statements
+- [ ] rewrite logical operators to have short circuit behavior
+- [ ] loops
 - [ ] what now? booleans, strings, variables, functions, closures, structs, types
 - [ ] consider adding making specific instructions for each type. right now op_add et al have to deal
 with both floats and integers
@@ -197,10 +200,7 @@ Vec2 := struct {
 
     // Eq
     eql := (a, b: Self) bool {
-        if a.x == b.x and a.y == b.y {
-            return true
-        }
-        return false
+        return a.x == b.x and a.y == b.y
     }
 }
 
@@ -216,7 +216,7 @@ index_of := fn (s: []T, target: T) ?int
 }
 
 main := fn () {
-    a := Vec2{1, 2}
+    a := Vec2{0, 0}
     b := Vec2{1, 2}
     
     slice := []Vec2{a, b}
