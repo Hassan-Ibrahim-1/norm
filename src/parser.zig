@@ -190,7 +190,7 @@ const Parser = struct {
         .{ .prefix = null, .infix = binary, .precedence = .comparison }, // less_equal
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // equal_greater
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // identifier
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // string
+        .{ .prefix = string, .infix = null, .precedence = .lowest }, // string
         .{ .prefix = float, .infix = null, .precedence = .lowest }, // float
         .{ .prefix = int, .infix = null, .precedence = .lowest }, // int
         .{ .prefix = null, .infix = binary, .precedence = ._and }, // _and
@@ -314,6 +314,12 @@ const Parser = struct {
 
     fn nil(p: *Parser) *Ast.Expr {
         return makeLiteral(p.arena.allocator(), .nil, p.previous);
+    }
+
+    fn string(p: *Parser) *Ast.Expr {
+        // remove the quotes around the string
+        const strval = p.previous.lexeme[1 .. p.previous.lexeme.len - 1];
+        return makeLiteral(p.arena.allocator(), .{ .string = strval }, p.previous);
     }
 
     fn binary(p: *Parser, left: *Ast.Expr) *Ast.Expr {
@@ -542,6 +548,7 @@ test "literals" {
         .{ .source = "true", .expected = "true" },
         .{ .source = "false", .expected = "false" },
         .{ .source = "nil", .expected = "nil" },
+        .{ .source = "\"hey\"", .expected = "hey" },
     };
 
     for (tests) |t| {

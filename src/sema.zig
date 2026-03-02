@@ -12,6 +12,7 @@ pub const NormType = enum {
     n_int,
     n_float,
     n_bool,
+    n_string,
 
     n_invalid,
 
@@ -114,7 +115,10 @@ pub const Nir = struct {
         token: Token,
 
         pub fn format(expr: *const Literal, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{f}", .{expr.value});
+            try switch (expr.value) {
+                .string => |s| w.print("\"{s}\"", .{s}),
+                else => w.print("{f}", .{expr.value}),
+            };
         }
     };
 
@@ -360,7 +364,8 @@ const Sema = struct {
             .float => .n_float,
             .integer => .n_int,
             .boolean => .n_bool,
-            .nil, .string => @panic("todo"),
+            .string => .n_string,
+            .nil => @panic("todo"),
         };
         return makeLiteral(s.arena.allocator(), .fromAst(l.value), l.token, ty);
     }

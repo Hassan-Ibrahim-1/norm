@@ -28,6 +28,8 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] test casting
 - [x] test failures in sema
 - [x] sema auto casts in arithmetic
+- [ ] strings + string interning for comparisons? look at go for inspiration
+- [ ] global constant string table
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
     * how do i handle user defined types? right now im just thinking of interning them
@@ -41,8 +43,6 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
     * https://mukulrathi.com/create-your-own-programming-language/intro-to-type-checking/
     * https://blog.polybdenum.com/2020/07/04/subtype-inference-by-example-part-1-introducing-cubiml.html
 - [ ] Think about reusing Ast stuff in Nir. There's a lot of duplicated code
-- [ ] strings + string interning for comparisons? look at go for inspiration
-- [ ] global constant string table
 - [ ] think about garbage collection
 - [ ] look at other type checking implementations, mine is unreadable and naive.
 - [ ] variable declartions + expressions
