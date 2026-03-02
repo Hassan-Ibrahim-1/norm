@@ -86,7 +86,7 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
         try stderr.print("[sema]: {f}\n", .{nir.expr});
 
         var chunk = compiler.compile(gpa, &nir);
-        defer chunk.deinit(gpa);
+        defer chunk.deinit();
 
         var vm = Vm.init(gpa, stdout, stderr);
         defer vm.deinit();

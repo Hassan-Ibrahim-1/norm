@@ -30,6 +30,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] sema auto casts in arithmetic
 - [ ] strings + string interning for comparisons? look at go for inspiration
 - [ ] global constant string table
+- [ ] think about garbage collection
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
     * how do i handle user defined types? right now im just thinking of interning them
@@ -42,8 +43,9 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
     this would probably make various number types easier to deal with i think?
     * https://mukulrathi.com/create-your-own-programming-language/intro-to-type-checking/
     * https://blog.polybdenum.com/2020/07/04/subtype-inference-by-example-part-1-introducing-cubiml.html
+- [ ] consider adding making specific instructions for each type. right now op_add et al have to deal
+with both floats and integers
 - [ ] Think about reusing Ast stuff in Nir. There's a lot of duplicated code
-- [ ] think about garbage collection
 - [ ] look at other type checking implementations, mine is unreadable and naive.
 - [ ] variable declartions + expressions
 - [ ] variable mutability + assignment
@@ -52,9 +54,6 @@ could be pointers to a debug info table. Would allow variable/function names, ty
 - [ ] if statements
 - [ ] rewrite logical operators to have short circuit behavior
 - [ ] loops
-- [ ] what now? booleans, strings, variables, functions, closures, structs, types
-- [ ] consider adding making specific instructions for each type. right now op_add et al have to deal
-with both floats and integers
 
 #### Notes for next session
 
@@ -62,6 +61,12 @@ Each pass should take ownership over the last IR
 
 There should be a constant string table like how compiled languages do it. No
 need for extra allocations.
+
+#### Notes on heap allocation
+
+All strings should obviously be heap allocated but what about structs? Not all
+structs should be heap allocated. This probably requires escape analysis. To
+keep it simple right now im just going to heap allocate everything.
 
 #### Language demo project
 
@@ -143,14 +148,14 @@ Vec2 := struct {
     // just a namespaced function
     // example call: `Vec2.new(..)`
     new := fn (x, y: float) Self {
-        // variables that have the same name
-        // as a field don't need specifier
+        // variables that have the same name as a field don't need specifier
         // otherwise {x: x, y: y}
         return {x, y}
     }
 }
 
 // all enum tags have a predefined `int` field
+// Direction.up.int
 Direction := enum(u32) {
     up,
     down,
@@ -174,7 +179,7 @@ switch_stmt := fn () {
     }
 }
 
-var_args := fn(fmt: string, x: any...) {
+var_args := fn (fmt: string, x: any...) {
     fmt.println(fmt, x)
 }
 
@@ -207,7 +212,7 @@ Vec2 := struct {
     y: f32,
 
     // Eq
-    eql := (a, b: Self) bool {
+    eql := fn (a, b: Self) bool {
         return a.x == b.x and a.y == b.y
     }
 }

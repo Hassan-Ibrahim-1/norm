@@ -79,46 +79,66 @@ fn oom() noreturn {
 }
 
 pub const Chunk = struct {
+    gpa: Allocator,
     code: std.ArrayList(u8),
     lines: std.ArrayList(u32),
     constants: std.ArrayList(Value),
 
-    pub const empty: Chunk = .{
-        .code = .empty,
-        .lines = .empty,
-        .constants = .empty,
-    };
+    string_arena: std.heap.ArenaAllocator,
+    strings: std.StringHashMapUnmanaged(void),
 
-    pub fn write(c: *Chunk, gpa: Allocator, b: u8, line: u32) void {
-        c.code.append(gpa, b) catch oom();
-        c.lines.append(gpa, line) catch oom();
+    pub fn init(gpa: Allocator) Chunk {
+        return .{
+            .gpa = gpa,
+            .string_arena = .init(gpa),
+            .code = .empty,
+            .lines = .empty,
+            .constants = .empty,
+            .strings = .empty,
+        };
     }
 
-    pub fn writeOp(c: *Chunk, gpa: Allocator, op: OpCode, line: u32) void {
-        c.write(gpa, op.byte(), line);
+    pub fn write(c: *Chunk, b: u8, line: u32) void {
+        c.code.append(c.gpa, b) catch oom();
+        c.lines.append(c.gpa, line) catch oom();
     }
 
-    pub fn writeConstant(c: *Chunk, gpa: Allocator, value: Value, line: u32) void {
-        const i = c.addConstant(gpa, value);
+    pub fn writeOp(c: *Chunk, op: OpCode, line: u32) void {
+        c.write(op.byte(), line);
+    }
+
+    pub fn writeConstant(c: *Chunk, value: Value, line: u32) void {
+        const i = c.addConstant(value);
         if (i < std.math.maxInt(u8)) {
-            c.writeOp(gpa, .op_constant, line);
-            c.write(gpa, @intCast(i), line);
+            c.writeOp(.op_constant, line);
+            c.write(@intCast(i), line);
         } else {
-            c.writeOp(gpa, .op_constant_long, line);
-            const arr = c.code.addManyAsArray(gpa, 3) catch oom();
+            c.writeOp(.op_constant_long, line);
+            const arr = c.code.addManyAsArray(c.gpa, 3) catch oom();
             mem.writeInt(u24, arr, @intCast(i), .little);
         }
     }
 
-    fn addConstant(c: *Chunk, gpa: Allocator, value: Value) usize {
-        c.constants.append(gpa, value) catch oom();
+    pub fn writeString(c: *Chunk, s: []const u8, line: u32) void {
+        const string = if (c.strings.getKey(s)) |existing| existing else string: {
+            const arena = c.string_arena.allocator();
+            const duped = arena.dupe(u8, s) catch oom();
+            c.strings.put(arena, duped, {}) catch oom();
+            break :string duped;
+        };
+        c.writeConstant(.{ .string = .ref(string) }, line);
+    }
+
+    fn addConstant(c: *Chunk, value: Value) usize {
+        c.constants.append(c.gpa, value) catch oom();
         return c.constants.items.len - 1;
     }
 
-    pub fn deinit(c: *Chunk, gpa: Allocator) void {
-        c.code.deinit(gpa);
-        c.lines.deinit(gpa);
-        c.constants.deinit(gpa);
+    pub fn deinit(c: *Chunk) void {
+        c.code.deinit(c.gpa);
+        c.lines.deinit(c.gpa);
+        c.constants.deinit(c.gpa);
+        c.string_arena.deinit();
         c.* = undefined;
     }
 };
@@ -194,27 +214,19 @@ pub const Compiler = struct {
 
     fn literal(c: *Compiler, l: *Nir.Literal) void {
         switch (l.value) {
-            .float => |f| c.compiling_chunk.writeConstant(
-                c.gpa,
-                .{ .float = f },
-                l.token.line,
-            ),
-            .integer => |i| c.compiling_chunk.writeConstant(
-                c.gpa,
-                .{ .integer = i },
-                l.token.line,
-            ),
+            .float => |f| c.compiling_chunk.writeConstant(.{ .float = f }, l.token.line),
+            .integer => |i| c.compiling_chunk.writeConstant(.{ .integer = i }, l.token.line),
             .boolean => |b| if (b)
                 c.emitOpCode(.op_true, l.token.line)
             else
                 c.emitOpCode(.op_false, l.token.line),
+            .string => |s| c.compiling_chunk.writeString(s, l.token.line),
             .nil => c.emitOpCode(.op_nil, l.token.line),
-            .string => @panic("todo"),
         }
     }
 
     fn emitConstant(c: *Compiler, value: Value, line: u32) void {
-        c.compiling_chunk.writeConstant(c.gpa, value, line);
+        c.compiling_chunk.writeConstant(value, line);
     }
 
     fn emitOpCode(c: *Compiler, op: OpCode, line: u32) void {
@@ -227,7 +239,7 @@ pub const Compiler = struct {
     }
 
     fn emitByte(c: *Compiler, b: u8, line: u32) void {
-        c.compiling_chunk.write(c.gpa, b, line);
+        c.compiling_chunk.write(b, line);
     }
 
     fn emitBytes(c: *Compiler, a: u8, b: u8) void {
@@ -237,9 +249,9 @@ pub const Compiler = struct {
 };
 
 pub fn compile(gpa: Allocator, nir: *Nir) Chunk {
-    if (nir.errors.len > 0) return .empty;
+    if (nir.errors.len > 0) return .init(gpa);
 
-    var chunk: Chunk = .empty;
+    var chunk: Chunk = .init(gpa);
     var c: Compiler = .init(gpa, &chunk);
 
     const expr = nir.expr;
@@ -255,12 +267,12 @@ const debug = @import("debug.zig");
 
 test "basic chunk ops" {
     const gpa = testing.allocator;
-    var chunk: Chunk = .empty;
-    defer chunk.deinit(gpa);
+    var chunk: Chunk = .init(gpa);
+    defer chunk.deinit();
 
-    chunk.writeConstant(gpa, .{ .integer = 10 }, 1);
-    chunk.writeConstant(gpa, .{ .float = 3.14 }, 1);
-    chunk.writeOp(gpa, .op_return, 2);
+    chunk.writeConstant(.{ .integer = 10 }, 1);
+    chunk.writeConstant(.{ .float = 3.14 }, 1);
+    chunk.writeOp(.op_return, 2);
 
     const expected_code = [_]u8{
         OpCode.op_constant.byte(), 0,
@@ -350,7 +362,7 @@ test "literals" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
         var chunk = try testCompile(gpa, t.source);
-        defer chunk.deinit(gpa);
+        defer chunk.deinit();
 
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
@@ -397,7 +409,7 @@ test "arithmetic expressions" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
         var chunk = try testCompile(gpa, t.source);
-        defer chunk.deinit(gpa);
+        defer chunk.deinit();
 
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
@@ -431,7 +443,7 @@ test "auto cast arithmetic expressions" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
         var chunk = try testCompile(gpa, t.source);
-        defer chunk.deinit(gpa);
+        defer chunk.deinit();
 
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
@@ -484,7 +496,7 @@ test "comparison" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
         var chunk = try testCompile(gpa, t.source);
-        defer chunk.deinit(gpa);
+        defer chunk.deinit();
 
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
@@ -518,7 +530,7 @@ test "logical" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
         var chunk = try testCompile(gpa, t.source);
-        defer chunk.deinit(gpa);
+        defer chunk.deinit();
 
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
@@ -546,7 +558,7 @@ test "casting" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
         var chunk = try testCompile(gpa, t.source);
-        defer chunk.deinit(gpa);
+        defer chunk.deinit();
 
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);

@@ -25,6 +25,8 @@ pub const Vm = struct {
     stack: [stack_max]Value,
     stack_top: [*]Value,
 
+    strings: std.StringHashMapUnmanaged(void),
+
     stdout: *Io.Writer,
     stderr: *Io.Writer,
 
@@ -41,6 +43,7 @@ pub const Vm = struct {
             .stderr = stderr,
             .stack = undefined,
             .stack_top = undefined,
+            .strings = .empty,
         };
     }
 
@@ -143,6 +146,7 @@ pub const Vm = struct {
                         .float => a.float == b.float,
                         .boolean => a.boolean == b.boolean,
                         .nil => true,
+                        .string => @panic("todo"),
                     };
                     vm.push(.{ .boolean = value });
                 },
@@ -154,6 +158,7 @@ pub const Vm = struct {
                         .float => a.float != b.float,
                         .boolean => a.boolean != b.boolean,
                         .nil => false,
+                        .string => @panic("todo"),
                     };
                     vm.push(.{ .boolean = value });
                 },
@@ -163,7 +168,7 @@ pub const Vm = struct {
                     const value = switch (a) {
                         .integer => a.integer > b.integer,
                         .float => a.float > b.float,
-                        .boolean, .nil => unreachable,
+                        .string, .boolean, .nil => unreachable,
                     };
                     vm.push(.{ .boolean = value });
                 },
@@ -173,7 +178,7 @@ pub const Vm = struct {
                     const value = switch (a) {
                         .integer => a.integer >= b.integer,
                         .float => a.float >= b.float,
-                        .boolean, .nil => unreachable,
+                        .string, .boolean, .nil => unreachable,
                     };
                     vm.push(.{ .boolean = value });
                 },
@@ -183,7 +188,7 @@ pub const Vm = struct {
                     const value = switch (a) {
                         .integer => a.integer < b.integer,
                         .float => a.float < b.float,
-                        .boolean, .nil => unreachable,
+                        .string, .boolean, .nil => unreachable,
                     };
                     vm.push(.{ .boolean = value });
                 },
@@ -193,7 +198,7 @@ pub const Vm = struct {
                     const value = switch (a) {
                         .integer => a.integer <= b.integer,
                         .float => a.float <= b.float,
-                        .boolean, .nil => unreachable,
+                        .string, .boolean, .nil => unreachable,
                     };
                     vm.push(.{ .boolean = value });
                 },
@@ -293,7 +298,7 @@ fn testRun(
     }
 
     var chunk = compiler.compile(gpa, &nir);
-    defer chunk.deinit(gpa);
+    defer chunk.deinit();
 
     var vm = Vm.init(gpa, stdout, stderr);
     defer vm.deinit();
