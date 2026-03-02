@@ -305,7 +305,7 @@ fn testCompile(gpa: Allocator, source: []const u8) !Chunk {
     return compile(gpa, &nir);
 }
 
-const CompilerTestCase = struct {
+const TestCase = struct {
     source: []const u8,
     expected_code: []const u8,
     expected_lines: []const u32,
@@ -314,7 +314,7 @@ const CompilerTestCase = struct {
 
 test "literals" {
     const gpa = testing.allocator;
-    const tests: []const CompilerTestCase = &.{
+    const tests: []const TestCase = &.{
         .{
             .source = "2",
             .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_return }),
@@ -360,7 +360,7 @@ test "literals" {
 
 test "arithmetic expressions" {
     const gpa = testing.allocator;
-    const tests: []const CompilerTestCase = &.{
+    const tests: []const TestCase = &.{
         .{
             .source = "2 + 3",
             .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_add, .op_return }),
@@ -407,7 +407,7 @@ test "arithmetic expressions" {
 
 test "auto cast arithmetic expressions" {
     const gpa = testing.allocator;
-    const tests: []const CompilerTestCase = &.{
+    const tests: []const TestCase = &.{
         .{
             .source = "2 + 3.0",
             .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_cast_to_float, .op_constant, 1, .op_add, .op_return }),
@@ -441,7 +441,7 @@ test "auto cast arithmetic expressions" {
 
 test "comparison" {
     const gpa = testing.allocator;
-    const tests: []const CompilerTestCase = &.{
+    const tests: []const TestCase = &.{
         // TODO: use something other than numbers
         .{
             .source = "2 < 3",
@@ -494,7 +494,7 @@ test "comparison" {
 
 test "logical" {
     const gpa = testing.allocator;
-    const tests: []const CompilerTestCase = &.{
+    const tests: []const TestCase = &.{
         .{
             .source = "true and true",
             .expected_code = &debug.opCodeToBytes(&.{ .op_true, .op_true, .op_and, .op_return }),
@@ -528,7 +528,7 @@ test "logical" {
 
 test "casting" {
     const gpa = testing.allocator;
-    const tests: []const CompilerTestCase = &.{
+    const tests: []const TestCase = &.{
         .{
             .source = "float(2)",
             .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_cast_to_float, .op_return }),

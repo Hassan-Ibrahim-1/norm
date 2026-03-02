@@ -63,6 +63,13 @@ Each pass should take ownership over the last IR
 There should be a constant string table like how compiled languages do it. No
 need for extra allocations.
 
+#### Language demo project
+
+Making a custom engine and doing some small demo in it would be nice. Radiance
+cascades seems interesting: [radiance cascades](https://radiance-cascades.com/)
+Since zig compiles to wasm, I could theoretically get this language running in a web browser.
+It'd be awesome if I could get an engine running in a browser.
+
 #### Language Ideas
 
 Type system, type inference, closures, go-like import system,
@@ -70,6 +77,7 @@ Type system, type inference, closures, go-like import system,
 How do you inline a function? This would be a fun optimization. Having variable
 levels of inlining to balance compilation speed and runtime performance would
 also be interesting.
+
 
 ```
 
