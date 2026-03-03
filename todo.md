@@ -32,6 +32,12 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] string concatenation
 - [x] string interning for comparisons? look at go for inspiration
 - [x] global constant string table
+- [ ] consider adding making specific instructions for each type. right now op_add et al have to deal
+- [ ] variable declartions + expressions
+- [ ] variable mutability + assignment
+- [ ] if statements
+- [ ] rewrite logical operators to have short circuit behavior
+- [ ] loops
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
     * how do i handle user defined types? right now im just thinking of interning them
@@ -44,18 +50,12 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
     this would probably make various number types easier to deal with i think?
     * https://mukulrathi.com/create-your-own-programming-language/intro-to-type-checking/
     * https://blog.polybdenum.com/2020/07/04/subtype-inference-by-example-part-1-introducing-cubiml.html
-- [ ] consider adding making specific instructions for each type. right now op_add et al have to deal
 with both floats and integers
 - [ ] Think about reusing Ast stuff in Nir. There's a lot of duplicated code
 - [ ] look at other type checking implementations, mine is unreadable and naive.
-- [ ] variable declartions + expressions
-- [ ] variable mutability + assignment
 - [ ] Think about debug info, instead of each chunk having line numbers there
-- [ ] think about garbage collection
 could be pointers to a debug info table. Would allow variable/function names, types etc.
-- [ ] if statements
-- [ ] rewrite logical operators to have short circuit behavior
-- [ ] loops
+- [ ] think about garbage collection
 
 #### Notes for next session
 
@@ -69,6 +69,10 @@ need for extra allocations.
 All strings should obviously be heap allocated but what about structs? Not all
 structs should be heap allocated. This probably requires escape analysis. To
 keep it simple right now im just going to heap allocate everything.
+
+Since the compiler decides what goes on the heap or stack, just emit different op codes
+for different cases. For objects which can be stored on the stack like a struct, we can have
+different op codes for field access.
 
 #### Language demo project
 
