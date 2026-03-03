@@ -35,11 +35,11 @@ pub const Ast = struct {
     };
 
     pub const Cast = struct {
-        target: Token,
+        token: Token,
         expr: *Expr,
 
         pub fn format(expr: *const Cast, w: *Io.Writer) Io.Writer.Error!void {
-            const target = switch (expr.target.type) {
+            const target = switch (expr.token.type) {
                 .kw_float => "float",
                 .kw_int => "int",
                 else => unreachable,
@@ -385,9 +385,9 @@ fn makeUnary(arena: Allocator, expr: *Ast.Expr, operator: Token) *Ast.Expr {
     return e;
 }
 
-fn makeCast(arena: Allocator, expr: *Ast.Expr, target: Token) *Ast.Expr {
+fn makeCast(arena: Allocator, expr: *Ast.Expr, token: Token) *Ast.Expr {
     const e = makeExpr(arena);
-    e.* = .{ .cast = .{ .expr = expr, .target = target } };
+    e.* = .{ .cast = .{ .expr = expr, .token = token } };
     return e;
 }
 

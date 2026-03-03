@@ -158,7 +158,7 @@ pub const Compiler = struct {
         switch (expr.kind) {
             .binary => |*b| c.binary(b),
             .unary => |*u| c.unary(u),
-            .cast => |*ca| c.cast(ca),
+            .cast => |*ca| c.cast(ca, expr.type),
             .grouping => |*g| c.grouping(g),
             .literal => |*l| c.literal(l),
         }
@@ -197,12 +197,12 @@ pub const Compiler = struct {
         }
     }
 
-    fn cast(c: *Compiler, cst: *Nir.Cast) void {
+    fn cast(c: *Compiler, cst: *Nir.Cast, target: NormType) void {
         c.expression(cst.expr);
-        const line = cst.target.line;
-        const op_code: OpCode = switch (cst.target.type) {
-            .kw_int => .op_cast_to_int,
-            .kw_float => .op_cast_to_float,
+        const line = cst.token.line;
+        const op_code: OpCode = switch (target) {
+            .n_int => .op_cast_to_int,
+            .n_float => .op_cast_to_float,
             else => unreachable,
         };
         c.emitOpCode(op_code, line);

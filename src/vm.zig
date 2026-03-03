@@ -117,11 +117,7 @@ pub const Vm = struct {
                 .op_divide => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    if (a == .integer) {
-                        vm.push(.{ .float = as(f32, a.integer) / as(f32, b.integer) });
-                    } else {
-                        vm.push(.{ .float = a.float / b.float });
-                    }
+                    vm.push(.{ .float = a.float / b.float });
                 },
 
                 .op_negate => {
@@ -344,7 +340,7 @@ test "arithmetic" {
         .{ .source = "2 + 3", .expected = .{ .integer = 5 } },
         .{ .source = "2 - 3", .expected = .{ .integer = -1 } },
         .{ .source = "2 * 3", .expected = .{ .integer = 6 } },
-        .{ .source = "2 / 3", .expected = .{ .float = as(f32, 2) / as(f32, 3) } },
+        .{ .source = "2 / 3", .expected = .{ .float = 2.0 / 3.0 } },
         .{ .source = "(2 + 1) / 3", .expected = .{ .float = 1.0 } },
         .{ .source = "-2", .expected = .{ .integer = -2 } },
         .{ .source = "-(2 * 3)", .expected = .{ .integer = -6 } },

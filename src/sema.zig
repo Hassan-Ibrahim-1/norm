@@ -20,8 +20,46 @@ pub const NormType = enum {
         try w.print("{s}", .{@tagName(nt)[2..]});
     }
 
-    pub const number_types: []const NormType = &.{ .n_int, .n_float };
+    fn isNumeric(ty: NormType) bool {
+        return ty == .n_float or ty == .n_int;
+    }
+
+    fn isInt(ty: NormType) bool {
+        return ty == .n_int;
+    }
+
+    fn isFloat(ty: NormType) bool {
+        return ty == .n_float;
+    }
+
+    fn isBool(ty: NormType) bool {
+        return ty == .n_bool;
+    }
+
+    fn isString(ty: NormType) bool {
+        return ty == .n_string;
+    }
+
+    fn isComparable(ty: NormType) bool {
+        return switch (ty) {
+            .n_int, .n_float, .n_bool, .n_string => true,
+            else => false,
+        };
+    }
+
+    fn isOrderable(ty: NormType) bool {
+        return switch (ty) {
+            .n_int, .n_float => true,
+            else => false,
+        };
+    }
+
+    fn int(ty: NormType) trait.SmallestEnumBackingType(NormType) {
+        return @intFromEnum(ty);
+    }
 };
+
+const trait = @import("trait.zig");
 
 pub const Diagnostics = struct {
     line: u32,
@@ -69,11 +107,11 @@ pub const Nir = struct {
     };
 
     pub const Cast = struct {
-        target: Token,
+        token: Token,
         expr: *Expr,
 
         pub fn format(expr: *const Cast, w: *Io.Writer) Io.Writer.Error!void {
-            const target = switch (expr.target.type) {
+            const target = switch (expr.token.type) {
                 .kw_float => "float",
                 .kw_int => "int",
                 else => unreachable,
@@ -150,14 +188,14 @@ pub const Nir = struct {
             return switch (e.kind) {
                 .binary => |*b| b.operator,
                 .unary => |*u| u.operator,
-                .cast => |*c| c.target,
+                .cast => |*c| c.token,
                 .literal => |*l| l.token,
                 .grouping => |*g| g.paren,
             };
         }
 
         pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
-            // _ = debug.dbgw(w, "", expr);
+            if (expr.type == .n_invalid) return w.print("invalid - an error was not reported", .{});
             try switch (expr.kind) {
                 inline .cast, .literal => |l| w.print("{f}", .{l}),
                 inline else => |b| w.print("{f}:{f}", .{ b, expr.type }),
@@ -185,23 +223,27 @@ fn makeUnary(arena: Allocator, expr: *Nir.Expr, op: Token, ty: NormType) *Nir.Ex
     return e;
 }
 
-fn makeCast(arena: Allocator, expr: *Nir.Expr, target: Token, ty: NormType) *Nir.Expr {
+fn makeCast(arena: Allocator, expr: *Nir.Expr, token: Token, target: NormType) *Nir.Expr {
     const e = makeExpr(arena);
     e.* = .{
-        .kind = .{ .cast = .{ .expr = expr, .target = target } },
-        .type = ty,
+        .kind = .{ .cast = .{ .expr = expr, .token = token } },
+        .type = target,
     };
     return e;
 }
 
-fn makeAnonCast(arena: Allocator, expr: *Nir.Expr, target: Token.Type, ty: NormType) *Nir.Expr {
-    const expr_token = expr.token();
-    const target_token: Token = .{
-        .type = target,
-        .lexeme = expr_token.lexeme,
-        .line = expr_token.line,
+fn fakeTargetToken(target: NormType, line: u32) Token {
+    return switch (target) {
+        .n_int => .{ .type = .kw_int, .lexeme = "int", .line = line },
+        .n_float => .{ .type = .kw_float, .lexeme = "float", .line = line },
+        else => unreachable,
     };
-    return makeCast(arena, expr, target_token, ty);
+}
+
+fn makeAnonCast(arena: Allocator, expr: *Nir.Expr, target: NormType) *Nir.Expr {
+    const expr_token = expr.token();
+    const target_token = fakeTargetToken(target, expr_token.line);
+    return makeCast(arena, expr, target_token, target);
 }
 
 fn makeBinary(arena: Allocator, left: *Nir.Expr, op: Token, right: *Nir.Expr, ty: NormType) *Nir.Expr {
@@ -237,10 +279,39 @@ const Sema = struct {
     errors: std.ArrayList(Diagnostics),
     // TODO: reset on statement boundary
     panic_mode: bool,
+    invalid: *Nir.Expr,
+
+    const TypeMask = u64;
+
+    fn mask(ty: NormType) TypeMask {
+        return @as(u64, 1) << ty.int();
+    }
+
+    const cast_map = init: {
+        var m = [_]TypeMask{0} ** @typeInfo(NormType).@"enum".fields.len;
+        m[NormType.n_int.int()] = mask(.n_float);
+        m[NormType.n_float.int()] = mask(.n_int);
+        break :init m;
+    };
+
+    fn canCast(ty: NormType, target: NormType) bool {
+        return (cast_map[ty.int()] & mask(target)) != 0;
+    }
+
+    fn commonType(l: NormType, r: NormType) NormType {
+        if (l == r) return l;
+        if (l.isNumeric() or r.isNumeric()) {
+            return .n_float;
+        }
+        @panic("hmm");
+    }
 
     fn init(gpa: Allocator) Sema {
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        const invalid = makeInvalid(arena.allocator());
         return .{
-            .arena = .init(gpa),
+            .invalid = invalid,
+            .arena = arena,
             .errors = .empty,
             .panic_mode = false,
         };
@@ -256,57 +327,73 @@ const Sema = struct {
         };
     }
 
+    fn tryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
+        if (expr.type == target) return expr;
+        const arena = s.arena.allocator();
+        if (canCast(expr.type, target)) {
+            return makeAnonCast(arena, expr, target);
+        }
+        return null;
+    }
+
     fn binary(s: *Sema, b: *Ast.Binary) *Nir.Expr {
         const left = s.expression(b.left);
         const right = s.expression(b.right);
         const arena = s.arena.allocator();
 
         switch (b.operator.type) {
-            .plus, .minus, .star, .slash => {
-                if (!s.expectTypes(
-                    right,
-                    NormType.number_types,
-                    "{f} {s} {f} is not a valid operation",
-                    .{ left.type, b.operator.lexeme, right.type },
-                )) {
-                    return makeInvalid(arena);
+            .plus => {
+                if (left.type.isNumeric() and right.type.isNumeric()) {
+                    const common_type = commonType(left.type, right.type);
+                    const cast_left = s.tryCast(left, common_type) orelse return s.invalid;
+                    const cast_right = s.tryCast(right, common_type) orelse return s.invalid;
+                    return makeBinary(arena, cast_left, b.operator, cast_right, common_type);
                 }
-
-                switch (left.type) {
-                    .n_float => if (right.type == .n_int) {
-                        const float_right = makeAnonCast(arena, right, .kw_float, .n_float);
-                        return makeBinary(arena, left, b.operator, float_right, .n_float);
-                    },
-                    .n_int => if (right.type == .n_float) {
-                        const float_left = makeAnonCast(arena, left, .kw_float, .n_float);
-                        return makeBinary(arena, float_left, b.operator, right, .n_float);
-                    },
-                    else => return s.reportErrorInv(
-                        left,
-                        "{f} {s} {f} is not a valid operation",
-                        .{ left.type, b.operator.lexeme, right.type },
-                    ),
+                if (left.type.isString() and right.type.isString()) {
+                    return makeBinary(arena, left, b.operator, right, .n_string);
                 }
+                return s.invalidBinaryOp(left, b.operator, right);
+            },
+            .minus, .star => {
+                if (left.type.isNumeric() and right.type.isNumeric()) {
+                    const common_type = commonType(left.type, right.type);
+                    const cast_left = s.tryCast(left, common_type) orelse return s.invalid;
+                    const cast_right = s.tryCast(right, common_type) orelse return s.invalid;
+                    return makeBinary(arena, cast_left, b.operator, cast_right, common_type);
+                }
+                return s.invalidBinaryOp(left, b.operator, right);
+            },
 
-                const expr_type: NormType = if (b.operator.type == .slash) .n_float else left.type;
-                return makeBinary(arena, left, b.operator, right, expr_type);
+            .slash => {
+                if (left.type.isNumeric() and right.type.isNumeric()) {
+                    const cast_left = s.tryCast(left, .n_float) orelse return s.invalid;
+                    const cast_right = s.tryCast(right, .n_float) orelse return s.invalid;
+                    return makeBinary(arena, cast_left, b.operator, cast_right, .n_float);
+                }
+                return s.invalidBinaryOp(left, b.operator, right);
             },
 
             .equal_equal, .bang_equal => {
-                if (left.type != right.type) {
-                    return s.reportErrorInv(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
+                if (left.type.isComparable() and right.type.isComparable()) {
+                    const common_type = commonType(left.type, right.type);
+                    const cast_left = s.tryCast(left, common_type) orelse s.compareError(left, right);
+                    const cast_right = s.tryCast(right, common_type) orelse s.compareError(left, right);
+                    return makeBinary(arena, cast_left, b.operator, cast_right, .n_bool);
                 }
-                return makeBinary(arena, left, b.operator, right, .n_bool);
+                return s.compareError(left, right);
             },
             .greater, .greater_equal, .less, .less_equal => {
-                if (left.type != right.type or !checkTypes(left, NormType.number_types)) {
-                    return s.reportErrorInv(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
+                if (left.type.isOrderable() and right.type.isOrderable()) {
+                    const common_type = commonType(left.type, right.type);
+                    const cast_left = s.tryCast(left, common_type) orelse s.compareError(left, right);
+                    const cast_right = s.tryCast(right, common_type) orelse s.compareError(left, right);
+                    return makeBinary(arena, cast_left, b.operator, cast_right, .n_bool);
                 }
-                return makeBinary(arena, left, b.operator, right, .n_bool);
+                return s.compareError(left, right);
             },
             .kw_and, .kw_or => {
-                if (left.type != right.type or left.type != .n_bool) {
-                    return s.reportErrorInv(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
+                if (left.type != .n_bool or right.type != .n_bool) {
+                    return s.compareError(left, right);
                 }
                 return makeBinary(arena, left, b.operator, right, .n_bool);
             },
@@ -314,19 +401,37 @@ const Sema = struct {
         }
     }
 
+    fn castError(s: *Sema, expr: *Nir.Expr, target: NormType) *Nir.Expr {
+        return s.reportErrorInv(expr, "Cannot cast {f} to {f}", .{ expr.type, target });
+    }
+
+    fn compareError(s: *Sema, left: *Nir.Expr, right: *Nir.Expr) *Nir.Expr {
+        return s.reportErrorInv(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
+    }
+
+    fn invalidBinaryOp(s: *Sema, left: *Nir.Expr, op: Token, right: *Nir.Expr) *Nir.Expr {
+        return s.reportErrorInv(left, "{f} {s} {f} is not a valid operation", .{
+            left.type,
+            op.lexeme,
+            right.type,
+        });
+    }
+
     fn unary(s: *Sema, u: *Ast.Unary) *Nir.Expr {
         const arena = s.arena.allocator();
         const expr = s.expression(u.expr);
         switch (u.operator.type) {
             .minus => {
-                if (!s.expectTypes(expr, NormType.number_types, "Cannot negate {f}", .{expr.type}))
-                    return makeInvalid(arena);
-                return makeUnary(arena, expr, u.operator, expr.type);
+                if (expr.type.isNumeric()) {
+                    return makeUnary(arena, expr, u.operator, expr.type);
+                }
+                return s.reportErrorInv(expr, "Cannot negate {f}", .{expr.type});
             },
             .bang => {
-                if (!s.expectType(expr, .n_bool, "! only supports bools", .{}))
-                    return makeInvalid(arena);
-                return makeUnary(arena, expr, u.operator, expr.type);
+                if (expr.type.isBool()) {
+                    return makeUnary(arena, expr, u.operator, expr.type);
+                }
+                return s.reportErrorInv(expr, "! only supports bools, got {f}", .{expr.type});
             },
             else => unreachable,
         }
@@ -336,26 +441,26 @@ const Sema = struct {
         const arena = s.arena.allocator();
 
         const expr = s.expression(c.expr);
-        if (expr.type == .n_invalid) return makeInvalid(arena);
+        if (expr.type == .n_invalid) return s.invalid;
 
-        const target_type: NormType = switch (c.target.type) {
+        const target_type: NormType = switch (c.token.type) {
             .kw_float => if (!s.expectType(expr, .n_int, "Cannot cast {f} to float, expected int", .{expr.type}))
-                return makeInvalid(arena)
+                return s.invalid
             else
                 .n_float,
             .kw_int => if (!s.expectType(expr, .n_float, "Cannot cast {f} to int, expected float", .{expr.type}))
-                return makeInvalid(arena)
+                return s.invalid
             else
                 .n_int,
             else => unreachable,
         };
 
-        return makeCast(arena, expr, c.target, target_type);
+        return makeCast(arena, expr, c.token, target_type);
     }
 
     fn grouping(s: *Sema, g: *Ast.Grouping) *Nir.Expr {
         const expr = s.expression(g.expr);
-        if (expr.type == .n_invalid) return makeInvalid(s.arena.allocator());
+        if (expr.type == .n_invalid) return s.invalid;
         return makeGrouping(s.arena.allocator(), expr, g.paren, expr.type);
     }
 
@@ -428,7 +533,7 @@ const Sema = struct {
 
     fn reportErrorInv(s: *Sema, expr: *Nir.Expr, comptime error_msg: []const u8, args: anytype) *Nir.Expr {
         s.reportError(expr, error_msg, args);
-        return makeInvalid(s.arena.allocator());
+        return s.invalid;
     }
 };
 
@@ -503,7 +608,7 @@ test "arithmetic" {
         expected: []const u8,
     } = &.{
         .{ .source = "2 + 2", .expected = "(2 + 2):int" },
-        .{ .source = "2 / 2", .expected = "(2 / 2):float" },
+        .{ .source = "2 / 2", .expected = "(float(2) / float(2)):float" },
         .{ .source = "-2", .expected = "(-2):int" },
         .{ .source = "-2", .expected = "(-2):int" },
         .{ .source = "2 * 3 + 4", .expected = "((2 * 3):int + 4):int" },
@@ -527,6 +632,44 @@ test "arithmetic failure" {
         .{ .source = "1.0 + true", .error_msg = "float + bool is not a valid operation" },
         .{ .source = "true + 1.0", .error_msg = "bool + float is not a valid operation" },
         .{ .source = "false + 2", .error_msg = "bool + int is not a valid operation" },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        const nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.arena.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
+    }
+}
+
+test "string concat" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{ .source = "\"Hello, \" + \"World\"", .expected = "(\"Hello, \" + \"World\"):string" },
+    };
+
+    for (tests) |t| {
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "string concat failure" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{ .source = "\"h\" + true", .error_msg = "string + bool is not a valid operation" },
+        .{ .source = "2.0 + \"h\" ", .error_msg = "float + string is not a valid operation" },
+        .{ .source = "3 + \"h\" ", .error_msg = "int + string is not a valid operation" },
     };
 
     for (tests) |t| {
@@ -615,8 +758,8 @@ test "logical failure" {
         .{ .source = "true and 1", .error_msg = "Cannot compare bool and int." },
         .{ .source = "1 or true", .error_msg = "Cannot compare int and bool." },
         .{ .source = "1 and 1", .error_msg = "Cannot compare int and int." },
-        .{ .source = "!1", .error_msg = "! only supports bools" },
-        .{ .source = "!1.0", .error_msg = "! only supports bools" },
+        .{ .source = "!1", .error_msg = "! only supports bools, got int" },
+        .{ .source = "!1.0", .error_msg = "! only supports bools, got float" },
     };
 
     for (tests) |t| {

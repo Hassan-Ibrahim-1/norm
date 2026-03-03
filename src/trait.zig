@@ -36,3 +36,7 @@ pub inline fn isEnum(T: type, t: anytype) bool {
     }
     return false;
 }
+
+pub fn SmallestEnumBackingType(T: type) type {
+    return std.math.IntFittingRange(0, @typeInfo(T).@"enum".fields.len - 1);
+}
