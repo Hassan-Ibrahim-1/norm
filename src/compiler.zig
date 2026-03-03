@@ -23,6 +23,11 @@ pub const OpCode = enum(u8) {
     op_multiply,
     op_divide,
 
+    // Concatenate two strings
+    //
+    // VM: Pop two strings off the stack and push a concatenated string
+    op_concat,
+
     // Boolean values
     //
     // VM: Push `true` or `false` onto the stack
@@ -156,7 +161,7 @@ pub const Compiler = struct {
 
     fn expression(c: *Compiler, expr: *Nir.Expr) void {
         switch (expr.kind) {
-            .binary => |*b| c.binary(b),
+            .binary => |*b| c.binary(b, expr.type),
             .unary => |*u| c.unary(u),
             .cast => |*ca| c.cast(ca, expr.type),
             .grouping => |*g| c.grouping(g),
@@ -164,13 +169,17 @@ pub const Compiler = struct {
         }
     }
 
-    fn binary(c: *Compiler, b: *Nir.Binary) void {
+    fn binary(c: *Compiler, b: *Nir.Binary, ty: NormType) void {
         c.expression(b.left);
         c.expression(b.right);
 
         const line = b.operator.line;
         const op_code: OpCode = switch (b.operator.type) {
-            .plus => .op_add,
+            .plus => switch (ty) {
+                .n_string => .op_concat,
+                .n_float, .n_int => .op_add,
+                else => unreachable,
+            },
             .minus => .op_subtract,
             .star => .op_multiply,
             .slash => .op_divide,
@@ -323,6 +332,8 @@ const TestCase = struct {
     expected_lines: []const u32,
     expected_constants: []const Value,
 };
+
+const dbg = debug.dbg;
 
 test "literals" {
     const gpa = testing.allocator;
@@ -563,5 +574,27 @@ test "casting" {
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
         try testing.expectEqualSlices(Value, t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "string concatenation" {
+    const gpa = testing.allocator;
+    const tests: []const TestCase = &.{
+        .{
+            .source = "\"Hello, \" + \"World\"",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_concat, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{ .{ .string = .ref("Hello, ") }, .{ .string = .ref("World") } },
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
     }
 }

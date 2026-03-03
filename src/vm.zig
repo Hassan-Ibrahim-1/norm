@@ -120,6 +120,12 @@ pub const Vm = struct {
                     vm.push(.{ .float = a.float / b.float });
                 },
 
+                .op_concat => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(vm.concat(a.string, b.string));
+                },
+
                 .op_negate => {
                     const a = vm.pop();
                     const negated: Value = switch (a) {
@@ -267,7 +273,17 @@ pub const Vm = struct {
         vm.stack_top -= 1;
         return vm.stack_top[0];
     }
+
+    fn concat(vm: *Vm, a: Value.String, b: Value.String) Value {
+        const arena = vm.chunk.string_arena.allocator();
+        const data = mem.concat(arena, u8, &.{ a.data, b.data }) catch oom();
+        return .{ .string = .ref(data) };
+    }
 };
+
+fn oom() noreturn {
+    @panic("oom");
+}
 
 const cast = @import("cast.zig");
 
@@ -300,6 +316,41 @@ fn testRun(
     defer vm.deinit();
 
     return vm.interpret(&chunk);
+}
+
+const NoFreeResult = struct {
+    chunk: Chunk,
+    value: Value,
+};
+
+fn testRunNoFree(
+    gpa: Allocator,
+    source: []const u8,
+    stdout: *Io.Writer,
+    stderr: *Io.Writer,
+) !NoFreeResult {
+    var l = Lexer.init(source);
+
+    var ast = parser.parse(gpa, &l);
+    defer ast.arena.deinit();
+    if (ast.errors.len > 0) {
+        debug.reportErrors(ast.errors, "test_runner", source);
+        return error.ParserFailed;
+    }
+
+    var nir = sema.analyze(gpa, &ast);
+    defer nir.arena.deinit();
+    if (nir.errors.len > 0) {
+        debug.reportErrors(nir.errors, "test_runner", source);
+        return error.SemaFailed;
+    }
+
+    var chunk = compiler.compile(gpa, &nir);
+
+    var vm = Vm.init(gpa, stdout, stderr);
+    defer vm.deinit();
+
+    return .{ .value = try vm.interpret(&chunk), .chunk = chunk };
 }
 
 test "literals" {
@@ -433,5 +484,26 @@ test "casting" {
         errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
         const value = try testRun(gpa, t.source, w, w);
         try testing.expectEqual(t.expected, value);
+    }
+}
+
+test "string concatenation" {
+    const gpa = testing.allocator;
+    var discarding: Io.Writer.Discarding = .init(&.{});
+    const w = &discarding.writer;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{
+        .{ .source = "\"Hello, \" + \"World\"", .expected = .{ .string = .ref("Hello, World") } },
+        .{ .source = "\"Hello, \" + \"World\" + \"!\"", .expected = .{ .string = .ref("Hello, World!") } },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        var result = try testRunNoFree(gpa, t.source, w, w);
+        defer result.chunk.deinit();
+        try testing.expectEqualDeep(t.expected, result.value);
     }
 }

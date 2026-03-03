@@ -118,7 +118,14 @@ pub fn dbgw(w: *Io.Writer, prefix: []const u8, value: anytype) @TypeOf(value) {
     return value;
 }
 
-pub fn dbg(prefix: []const u8, value: anytype) @TypeOf(value) {
+pub fn dbg(prefix: []const u8, value: anytype) void {
+    std.debug.print("{s} = {f}\n", .{
+        prefix,
+        std.json.fmt(value, .{ .whitespace = .indent_4 }),
+    });
+}
+
+pub fn dbgr(prefix: []const u8, value: anytype) @TypeOf(value) {
     std.debug.print("{s} = {f}\n", .{
         prefix,
         std.json.fmt(value, .{ .whitespace = .indent_4 }),
