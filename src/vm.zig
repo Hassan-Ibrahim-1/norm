@@ -85,36 +85,43 @@ pub const Vm = struct {
                     vm.push(vm.readLongConstant());
                 },
 
-                .op_add => {
+                .op_add_int => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    if (a == .integer) {
-                        vm.push(.{ .integer = a.integer + b.integer });
-                    } else {
-                        vm.push(.{ .float = a.float + b.float });
-                    }
+                    vm.push(.{ .integer = a.integer + b.integer });
                 },
 
-                .op_subtract => {
+                .op_add_float => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    if (a == .integer) {
-                        vm.push(.{ .integer = a.integer - b.integer });
-                    } else {
-                        vm.push(.{ .float = a.float - b.float });
-                    }
+                    vm.push(.{ .float = a.float + b.float });
                 },
 
-                .op_multiply => {
+                .op_subtract_int => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    if (a == .integer) {
-                        vm.push(.{ .integer = a.integer * b.integer });
-                    } else {
-                        vm.push(.{ .float = a.float * b.float });
-                    }
+                    vm.push(.{ .integer = a.integer - b.integer });
                 },
-                .op_divide => {
+
+                .op_subtract_float => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .float = a.float - b.float });
+                },
+
+                .op_multiply_int => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .integer = a.integer * b.integer });
+                },
+
+                .op_multiply_float => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .float = a.float * b.float });
+                },
+
+                .op_divide_float => {
                     const b = vm.pop();
                     const a = vm.pop();
                     vm.push(.{ .float = a.float / b.float });
@@ -126,83 +133,102 @@ pub const Vm = struct {
                     vm.push(vm.stringConcat(a.string, b.string));
                 },
 
-                .op_negate => {
+                .op_negate_int => {
                     const a = vm.pop();
-                    const negated: Value = switch (a) {
-                        .float => |f| .{ .float = -f },
-                        .integer => |i| .{ .integer = -i },
-                        else => unreachable,
-                    };
-                    vm.push(negated);
+                    vm.push(.{ .integer = -a.integer });
+                },
+
+                .op_negate_float => {
+                    const a = vm.pop();
+                    vm.push(.{ .float = -a.float });
                 },
 
                 .op_true => vm.push(.{ .boolean = true }),
                 .op_false => vm.push(.{ .boolean = false }),
                 .op_nil => vm.push(.nil),
 
-                .op_equal => {
+                .op_equal_int => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    const value = switch (a) {
-                        .integer => a.integer == b.integer,
-                        .float => a.float == b.float,
-                        .boolean => a.boolean == b.boolean,
-                        .nil => true,
-                        .string => stringEqual(a.string, b.string),
-                    };
-                    vm.push(.{ .boolean = value });
+                    vm.push(.{ .boolean = a.integer == b.integer });
                 },
-                .op_not_equal => {
+                .op_not_equal_int => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    const value = switch (a) {
-                        .integer => a.integer != b.integer,
-                        .float => a.float != b.float,
-                        .boolean => a.boolean != b.boolean,
-                        .nil => false,
-                        .string => !stringEqual(a.string, b.string),
-                    };
-                    vm.push(.{ .boolean = value });
+                    vm.push(.{ .boolean = a.integer != b.integer });
                 },
-                .op_greater => {
+                .op_greater_int => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    const value = switch (a) {
-                        .integer => a.integer > b.integer,
-                        .float => a.float > b.float,
-                        .string, .boolean, .nil => unreachable,
-                    };
-                    vm.push(.{ .boolean = value });
+                    vm.push(.{ .boolean = a.integer > b.integer });
                 },
-                .op_greater_equal => {
+                .op_greater_equal_int => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    const value = switch (a) {
-                        .integer => a.integer >= b.integer,
-                        .float => a.float >= b.float,
-                        .string, .boolean, .nil => unreachable,
-                    };
-                    vm.push(.{ .boolean = value });
+                    vm.push(.{ .boolean = a.integer >= b.integer });
                 },
-                .op_less => {
+                .op_less_int => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    const value = switch (a) {
-                        .integer => a.integer < b.integer,
-                        .float => a.float < b.float,
-                        .string, .boolean, .nil => unreachable,
-                    };
-                    vm.push(.{ .boolean = value });
+                    vm.push(.{ .boolean = a.integer < b.integer });
                 },
-                .op_less_equal => {
+                .op_less_equal_int => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    const value = switch (a) {
-                        .integer => a.integer <= b.integer,
-                        .float => a.float <= b.float,
-                        .string, .boolean, .nil => unreachable,
-                    };
-                    vm.push(.{ .boolean = value });
+                    vm.push(.{ .boolean = a.integer <= b.integer });
+                },
+
+                .op_equal_float => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = a.float == b.float });
+                },
+                .op_not_equal_float => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = a.float != b.float });
+                },
+                .op_greater_float => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = a.float > b.float });
+                },
+                .op_greater_equal_float => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = a.float >= b.float });
+                },
+                .op_less_float => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = a.float < b.float });
+                },
+                .op_less_equal_float => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = a.float <= b.float });
+                },
+
+                .op_equal_string => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = stringEqual(a.string, b.string) });
+                },
+                .op_not_equal_string => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = !stringEqual(a.string, b.string) });
+                },
+
+                .op_equal_bool => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = a.boolean == b.boolean });
+                },
+                .op_not_equal_bool => {
+                    const b = vm.pop();
+                    const a = vm.pop();
+                    vm.push(.{ .boolean = a.boolean != b.boolean });
                 },
 
                 .op_and => {

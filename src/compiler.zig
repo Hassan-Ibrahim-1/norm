@@ -18,10 +18,14 @@ pub const OpCode = enum(u8) {
     op_constant_long,
 
     // VM: Pop two constants off the stack and then push one
-    op_add,
-    op_subtract,
-    op_multiply,
-    op_divide,
+    op_add_int,
+    op_subtract_int,
+    op_multiply_int,
+
+    op_add_float,
+    op_subtract_float,
+    op_multiply_float,
+    op_divide_float,
 
     // Concatenate two strings
     //
@@ -37,17 +41,32 @@ pub const OpCode = enum(u8) {
     // Negate an integer of a float
     //
     // VM: Pop a constant off the stack and then push negated
-    op_negate,
+    op_negate_int,
+
+    op_negate_float,
 
     // Comparison operators
     //
     // VM: Pop two constants off the stack, compare them, and then push a boolean value
-    op_equal,
-    op_not_equal,
-    op_greater,
-    op_greater_equal,
-    op_less,
-    op_less_equal,
+    op_equal_int,
+    op_not_equal_int,
+    op_greater_int,
+    op_greater_equal_int,
+    op_less_int,
+    op_less_equal_int,
+
+    op_equal_float,
+    op_not_equal_float,
+    op_greater_float,
+    op_greater_equal_float,
+    op_less_float,
+    op_less_equal_float,
+
+    op_equal_string,
+    op_not_equal_string,
+
+    op_equal_bool,
+    op_not_equal_bool,
 
     // Binary logical operators
     //
@@ -161,7 +180,7 @@ pub const Compiler = struct {
 
     fn expression(c: *Compiler, expr: *Nir.Expr) void {
         switch (expr.kind) {
-            .binary => |*b| c.binary(b, expr.type),
+            .binary => |*b| c.binary(b),
             .unary => |*u| c.unary(u),
             .cast => |*ca| c.cast(ca, expr.type),
             .grouping => |*g| c.grouping(g),
@@ -169,26 +188,64 @@ pub const Compiler = struct {
         }
     }
 
-    fn binary(c: *Compiler, b: *Nir.Binary, ty: NormType) void {
+    fn binary(c: *Compiler, b: *Nir.Binary) void {
         c.expression(b.left);
         c.expression(b.right);
 
         const line = b.operator.line;
+        const operand_type = b.left.type;
         const op_code: OpCode = switch (b.operator.type) {
-            .plus => switch (ty) {
+            .plus => switch (operand_type) {
                 .n_string => .op_concat,
-                .n_float, .n_int => .op_add,
+                .n_float => .op_add_float,
+                .n_int => .op_add_int,
                 else => unreachable,
             },
-            .minus => .op_subtract,
-            .star => .op_multiply,
-            .slash => .op_divide,
-            .equal_equal => .op_equal,
-            .bang_equal => .op_not_equal,
-            .greater => .op_greater,
-            .greater_equal => .op_greater_equal,
-            .less => .op_less,
-            .less_equal => .op_less_equal,
+            .minus => switch (operand_type) {
+                .n_float => .op_subtract_float,
+                .n_int => .op_subtract_int,
+                else => unreachable,
+            },
+            .star => switch (operand_type) {
+                .n_float => .op_multiply_float,
+                .n_int => .op_multiply_int,
+                else => unreachable,
+            },
+            .slash => .op_divide_float,
+            .equal_equal => switch (operand_type) {
+                .n_string => .op_equal_string,
+                .n_float => .op_equal_float,
+                .n_int => .op_equal_int,
+                .n_bool => .op_equal_bool,
+                else => unreachable,
+            },
+            .bang_equal => switch (operand_type) {
+                .n_string => .op_not_equal_string,
+                .n_float => .op_not_equal_float,
+                .n_int => .op_not_equal_int,
+                .n_bool => .op_not_equal_bool,
+                else => unreachable,
+            },
+            .greater => switch (operand_type) {
+                .n_float => .op_greater_float,
+                .n_int => .op_greater_int,
+                else => unreachable,
+            },
+            .greater_equal => switch (operand_type) {
+                .n_float => .op_greater_equal_float,
+                .n_int => .op_greater_equal_int,
+                else => unreachable,
+            },
+            .less => switch (operand_type) {
+                .n_float => .op_less_float,
+                .n_int => .op_less_int,
+                else => unreachable,
+            },
+            .less_equal => switch (operand_type) {
+                .n_float => .op_less_equal_float,
+                .n_int => .op_less_equal_int,
+                else => unreachable,
+            },
             .kw_and => .op_and,
             .kw_or => .op_or,
             else => unreachable,
@@ -199,8 +256,16 @@ pub const Compiler = struct {
     fn unary(c: *Compiler, u: *Nir.Unary) void {
         c.expression(u.expr);
         const line = u.operator.line;
+        const ty = u.expr.type;
         switch (u.operator.type) {
-            .minus => c.emitOpCode(.op_negate, line),
+            .minus => {
+                const op_code: OpCode = switch (ty) {
+                    .n_float => .op_negate_float,
+                    .n_int => .op_negate_int,
+                    else => unreachable,
+                };
+                c.emitOpCode(op_code, line);
+            },
             .bang => c.emitOpCode(.op_not, line),
             else => unreachable,
         }
@@ -386,13 +451,13 @@ test "arithmetic expressions" {
     const tests: []const TestCase = &.{
         .{
             .source = "2 + 3",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_add, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_add_int, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
         },
         .{
             .source = "2.0 + 3.0",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_add, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_add_float, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .float = 2 }, .{ .float = 3 } },
         },
@@ -403,13 +468,13 @@ test "arithmetic expressions" {
                 0,
                 .op_constant,
                 1,
-                .op_add,
+                .op_add_float,
                 .op_constant,
                 2,
                 .op_constant,
                 3,
-                .op_divide,
-                .op_subtract,
+                .op_divide_float,
+                .op_subtract_float,
                 .op_return,
             }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0 },
@@ -433,19 +498,19 @@ test "auto cast arithmetic expressions" {
     const tests: []const TestCase = &.{
         .{
             .source = "2 + 3.0",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_cast_to_float, .op_constant, 1, .op_add, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_cast_to_float, .op_constant, 1, .op_add_float, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 } },
         },
         .{
             .source = "2 * 3.0",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_cast_to_float, .op_constant, 1, .op_multiply, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_cast_to_float, .op_constant, 1, .op_multiply_float, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .float = 3 } },
         },
         .{
             .source = "2.0 / 3",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_cast_to_float, .op_divide, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_cast_to_float, .op_divide_float, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .float = 2 }, .{ .integer = 3 } },
         },
@@ -468,37 +533,37 @@ test "comparison" {
         // TODO: use something other than numbers
         .{
             .source = "2 < 3",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_less, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_less_int, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
         },
         .{
             .source = "2 <= 3",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_less_equal, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_less_equal_int, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
         },
         .{
             .source = "2 > 3",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_greater, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_greater_int, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
         },
         .{
             .source = "2 >= 3",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_greater_equal, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_greater_equal_int, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
         },
         .{
             .source = "2 == 3",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_equal, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_equal_int, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
         },
         .{
             .source = "2 != 3",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_not_equal, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_not_equal_int, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 3 } },
         },
