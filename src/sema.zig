@@ -345,8 +345,8 @@ const Sema = struct {
             .plus => {
                 if (left.type.isNumeric() and right.type.isNumeric()) {
                     const common_type = commonType(left.type, right.type);
-                    const cast_left = s.tryCast(left, common_type) orelse return s.invalid;
-                    const cast_right = s.tryCast(right, common_type) orelse return s.invalid;
+                    const cast_left = s.tryCast(left, common_type) orelse return s.castError(left, common_type);
+                    const cast_right = s.tryCast(right, common_type) orelse return s.castError(right, common_type);
                     return makeBinary(arena, cast_left, b.operator, cast_right, common_type);
                 }
                 if (left.type.isString() and right.type.isString()) {
@@ -357,8 +357,8 @@ const Sema = struct {
             .minus, .star => {
                 if (left.type.isNumeric() and right.type.isNumeric()) {
                     const common_type = commonType(left.type, right.type);
-                    const cast_left = s.tryCast(left, common_type) orelse return s.invalid;
-                    const cast_right = s.tryCast(right, common_type) orelse return s.invalid;
+                    const cast_left = s.tryCast(left, common_type) orelse return s.castError(left, common_type);
+                    const cast_right = s.tryCast(right, common_type) orelse return s.castError(right, common_type);
                     return makeBinary(arena, cast_left, b.operator, cast_right, common_type);
                 }
                 return s.invalidBinaryOp(left, b.operator, right);
@@ -806,6 +806,22 @@ test "auto casting" {
     } = &.{
         .{ .source = "2 + 3.0", .expected = "(float(2) + 3.000):float" },
         .{ .source = "3.0 * 4", .expected = "(3.000 * float(4)):float" },
+        .{ .source = "2 - 3.0", .expected = "(float(2) - 3.000):float" },
+        .{ .source = "3.0 - 4", .expected = "(3.000 - float(4)):float" },
+        .{ .source = "2 / 3.0", .expected = "(float(2) / 3.000):float" },
+        .{ .source = "3.0 / 4", .expected = "(3.000 / float(4)):float" },
+        .{ .source = "2 == 3.0", .expected = "(float(2) == 3.000):bool" },
+        .{ .source = "3.0 == 4", .expected = "(3.000 == float(4)):bool" },
+        .{ .source = "2 != 3.0", .expected = "(float(2) != 3.000):bool" },
+        .{ .source = "3.0 != 4", .expected = "(3.000 != float(4)):bool" },
+        .{ .source = "2 > 3.0", .expected = "(float(2) > 3.000):bool" },
+        .{ .source = "3.0 > 4", .expected = "(3.000 > float(4)):bool" },
+        .{ .source = "2 >= 3.0", .expected = "(float(2) >= 3.000):bool" },
+        .{ .source = "3.0 >= 4", .expected = "(3.000 >= float(4)):bool" },
+        .{ .source = "2 < 3.0", .expected = "(float(2) < 3.000):bool" },
+        .{ .source = "3.0 < 4", .expected = "(3.000 < float(4)):bool" },
+        .{ .source = "2 <= 3.0", .expected = "(float(2) <= 3.000):bool" },
+        .{ .source = "3.0 <= 4", .expected = "(3.000 <= float(4)):bool" },
     };
 
     for (tests) |t| {

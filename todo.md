@@ -32,7 +32,6 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] string concatenation
 - [x] string interning for comparisons? look at go for inspiration
 - [x] global constant string table
-- [ ] think about garbage collection
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
     * how do i handle user defined types? right now im just thinking of interning them
@@ -52,6 +51,7 @@ with both floats and integers
 - [ ] variable declartions + expressions
 - [ ] variable mutability + assignment
 - [ ] Think about debug info, instead of each chunk having line numbers there
+- [ ] think about garbage collection
 could be pointers to a debug info table. Would allow variable/function names, types etc.
 - [ ] if statements
 - [ ] rewrite logical operators to have short circuit behavior
