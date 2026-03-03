@@ -28,7 +28,9 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] test casting
 - [x] test failures in sema
 - [x] sema auto casts in arithmetic
-- [ ] strings + string interning for comparisons? look at go for inspiration
+- [x] string literal support
+- [x] string concatenation
+- [ ] string interning for comparisons? look at go for inspiration
 - [ ] global constant string table
 - [ ] think about garbage collection
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
