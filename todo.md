@@ -30,8 +30,8 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] sema auto casts in arithmetic
 - [x] string literal support
 - [x] string concatenation
-- [ ] string interning for comparisons? look at go for inspiration
-- [ ] global constant string table
+- [x] string interning for comparisons? look at go for inspiration
+- [x] global constant string table
 - [ ] think about garbage collection
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
