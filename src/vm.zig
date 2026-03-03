@@ -123,7 +123,7 @@ pub const Vm = struct {
                 .op_concat => {
                     const b = vm.pop();
                     const a = vm.pop();
-                    vm.push(vm.concat(a.string, b.string));
+                    vm.push(vm.stringConcat(a.string, b.string));
                 },
 
                 .op_negate => {
@@ -148,7 +148,7 @@ pub const Vm = struct {
                         .float => a.float == b.float,
                         .boolean => a.boolean == b.boolean,
                         .nil => true,
-                        .string => @panic("todo"),
+                        .string => stringEqual(a.string, b.string),
                     };
                     vm.push(.{ .boolean = value });
                 },
@@ -160,7 +160,7 @@ pub const Vm = struct {
                         .float => a.float != b.float,
                         .boolean => a.boolean != b.boolean,
                         .nil => false,
-                        .string => @panic("todo"),
+                        .string => !stringEqual(a.string, b.string),
                     };
                     vm.push(.{ .boolean = value });
                 },
@@ -274,10 +274,15 @@ pub const Vm = struct {
         return vm.stack_top[0];
     }
 
-    fn concat(vm: *Vm, a: Value.String, b: Value.String) Value {
+    fn stringConcat(vm: *Vm, a: Value.String, b: Value.String) Value {
         const arena = vm.chunk.string_arena.allocator();
         const data = mem.concat(arena, u8, &.{ a.data, b.data }) catch oom();
         return .{ .string = .ref(data) };
+    }
+
+    fn stringEqual(a: Value.String, b: Value.String) bool {
+        if (a.data.ptr == b.data.ptr) return true;
+        return mem.eql(u8, a.data, b.data);
     }
 };
 
@@ -505,5 +510,28 @@ test "string concatenation" {
         var result = try testRunNoFree(gpa, t.source, w, w);
         defer result.chunk.deinit();
         try testing.expectEqualDeep(t.expected, result.value);
+    }
+}
+
+test "string comparisons" {
+    const gpa = testing.allocator;
+    var discarding: Io.Writer.Discarding = .init(&.{});
+    const w = &discarding.writer;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{
+        .{ .source = "\"2\" == \"2\"", .expected = .{ .boolean = true } },
+        .{ .source = "\"2\" != \"2\"", .expected = .{ .boolean = false } },
+        .{ .source = "\"Hey\" == \"Hey\"", .expected = .{ .boolean = true } },
+        .{ .source = "\"ey\" == \"Hey\"", .expected = .{ .boolean = false } },
+        .{ .source = "\"ey\" != \"Hey\"", .expected = .{ .boolean = true } },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const value = try testRun(gpa, t.source, w, w);
+        try testing.expectEqual(t.expected, value);
     }
 }

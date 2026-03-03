@@ -695,6 +695,8 @@ test "comparison" {
         .{ .source = "1 != 2", .expected = "(1 != 2):bool" },
         .{ .source = "true == true", .expected = "(true == true):bool" },
         .{ .source = "true != false", .expected = "(true != false):bool" },
+        .{ .source = "\"Hey\" == \"Hey\"", .expected = "(\"Hey\" == \"Hey\"):bool" },
+        .{ .source = "\"Hey\" != \"Hey\"", .expected = "(\"Hey\" != \"Hey\"):bool" },
     };
 
     for (tests) |t| {
@@ -716,6 +718,10 @@ test "comparison failure" {
         .{ .source = "true == 1", .error_msg = "Cannot compare bool and int." },
         .{ .source = "true != 2", .error_msg = "Cannot compare bool and int." },
         .{ .source = "2 < false", .error_msg = "Cannot compare int and bool." },
+        .{ .source = "\"Hey\" == 2", .error_msg = "Cannot compare string and int." },
+        .{ .source = "2 == \"Hey\"", .error_msg = "Cannot compare int and string." },
+        .{ .source = "\"Hey\" != 2", .error_msg = "Cannot compare string and int." },
+        .{ .source = "2 != \"Hey\"", .error_msg = "Cannot compare int and string." },
     };
 
     for (tests) |t| {
