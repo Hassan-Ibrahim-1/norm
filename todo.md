@@ -32,8 +32,8 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] string concatenation
 - [x] string interning for comparisons? look at go for inspiration
 - [x] global constant string table
-- [ ] consider adding making specific instructions for each type. right now op_add et al have to deal
-- [ ] variable declartions + expressions
+- [x] consider adding making specific instructions for each type. right now op_add et al have to deal
+- [ ] variable declartions + statements + scopes
 - [ ] variable mutability + assignment
 - [ ] if statements
 - [ ] rewrite logical operators to have short circuit behavior
@@ -73,6 +73,24 @@ keep it simple right now im just going to heap allocate everything.
 Since the compiler decides what goes on the heap or stack, just emit different op codes
 for different cases. For objects which can be stored on the stack like a struct, we can have
 different op codes for field access.
+
+#### Variables
+
+I want variables to work the same way as they do in zig. So no shadowing at
+all. This lets me resolve what each variable refers to at compile time. But, I
+do want to allow global variables to be used before they are declared. The package
+system in this language should also work just like odin's so that means global
+variables are allowed to be used across a package as well.
+
+Sema should make sure all variables are unique and don't overlap in the same
+scope / parent scope. Create a symbol table with names, types, and scope.
+
+Go through the AST and collect all top level declarations.
+
+Then in a second pass, go through the AST again and define all local variables
+and their scopes and types, go through function bodies.
+
+How will structs and enums fit into this?
 
 #### Language demo project
 
@@ -185,6 +203,9 @@ switch_stmt := fn () {
     }
 }
 
+// `any...` is equivalent to `[]any` but the caller can put the arguments in
+// without having to allocate a slice themselves when the callee wants to
+// pass in a list for tho they have to do so with the `...` operator, so same as go
 var_args := fn (fmt: string, x: any...) {
     fmt.println(fmt, x)
 }
