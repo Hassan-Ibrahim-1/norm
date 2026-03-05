@@ -3,7 +3,7 @@ const mem = std.mem;
 const Io = std.Io;
 const Allocator = mem.Allocator;
 
-const Ast = @import("parser.zig").Ast;
+const Ast = @import("Ast.zig");
 const debug = @import("debug.zig");
 const ers = @import("errors.zig");
 const Token = @import("Lexer.zig").Token;
@@ -58,7 +58,7 @@ fn makeBinary(arena: Allocator, left: *Nir.Expr, op: Token, right: *Nir.Expr, ty
     return e;
 }
 
-fn makeLiteral(arena: Allocator, value: Nir.Literal.Value, token: Token, ty: NormType) *Nir.Expr {
+fn makeLiteral(arena: Allocator, value: Nir.Expr.Literal.Value, token: Token, ty: NormType) *Nir.Expr {
     const e = makeExpr(arena);
     e.* = .{
         .kind = .{ .literal = .{ .token = token, .value = value } },
@@ -139,7 +139,7 @@ const Sema = struct {
         return null;
     }
 
-    fn binary(s: *Sema, b: *Ast.Binary) *Nir.Expr {
+    fn binary(s: *Sema, b: *Ast.Expr.Binary) *Nir.Expr {
         const left = s.expression(b.left);
         const right = s.expression(b.right);
         const arena = s.arena.allocator();
@@ -220,7 +220,7 @@ const Sema = struct {
         });
     }
 
-    fn unary(s: *Sema, u: *Ast.Unary) *Nir.Expr {
+    fn unary(s: *Sema, u: *Ast.Expr.Unary) *Nir.Expr {
         const arena = s.arena.allocator();
         const expr = s.expression(u.expr);
         switch (u.operator.type) {
@@ -240,7 +240,7 @@ const Sema = struct {
         }
     }
 
-    fn cast(s: *Sema, c: *Ast.Cast) *Nir.Expr {
+    fn cast(s: *Sema, c: *Ast.Expr.Cast) *Nir.Expr {
         const arena = s.arena.allocator();
 
         const expr = s.expression(c.expr);
@@ -261,13 +261,13 @@ const Sema = struct {
         return makeCast(arena, expr, c.token, target_type);
     }
 
-    fn grouping(s: *Sema, g: *Ast.Grouping) *Nir.Expr {
+    fn grouping(s: *Sema, g: *Ast.Expr.Grouping) *Nir.Expr {
         const expr = s.expression(g.expr);
         if (expr.type == .n_invalid) return s.invalid;
         return makeGrouping(s.arena.allocator(), expr, g.paren, expr.type);
     }
 
-    fn literal(s: *Sema, l: *Ast.Literal) *Nir.Expr {
+    fn literal(s: *Sema, l: *Ast.Expr.Literal) *Nir.Expr {
         const ty: NormType = switch (l.value) {
             .float => .n_float,
             .integer => .n_int,
@@ -354,6 +354,7 @@ pub fn analyze(gpa: Allocator, ast: *Ast) Nir {
         .arena = sema.arena,
         .errors = errors,
         .expr = nir_expr,
+        .sym_table = undefined,
     };
 }
 

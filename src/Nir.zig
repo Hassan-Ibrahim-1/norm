@@ -7,7 +7,7 @@ const mem = std.mem;
 const Io = std.Io;
 
 const Allocator = mem.Allocator;
-const Ast = @import("parser.zig").Ast;
+const Ast = @import("Ast.zig");
 const debug = @import("debug.zig");
 const ers = @import("errors.zig");
 const Token = @import("Lexer.zig").Token;
@@ -94,89 +94,89 @@ pub const NormType = enum {
     }
 };
 
-pub const Binary = struct {
-    left: *Expr,
-    operator: Token,
-    right: *Expr,
+pub const Expr = struct {
+    pub const Binary = struct {
+        left: *Expr,
+        operator: Token,
+        right: *Expr,
 
-    pub fn format(expr: *const Binary, w: *Io.Writer) Io.Writer.Error!void {
-        try w.print("({f} {s} {f})", .{ expr.left, expr.operator.lexeme, expr.right });
-    }
-};
-
-pub const Unary = struct {
-    operator: Token,
-    expr: *Expr,
-
-    pub fn format(expr: *const Unary, w: *Io.Writer) Io.Writer.Error!void {
-        try w.print("({s}{f})", .{ expr.operator.lexeme, expr.expr });
-    }
-};
-
-pub const Cast = struct {
-    token: Token,
-    expr: *Expr,
-
-    pub fn format(expr: *const Cast, w: *Io.Writer) Io.Writer.Error!void {
-        const target = switch (expr.token.type) {
-            .kw_float => "float",
-            .kw_int => "int",
-            else => unreachable,
-        };
-        try w.print("{s}({f})", .{ target, expr.expr });
-    }
-};
-
-pub const Literal = struct {
-    pub const Value = union(enum) {
-        integer: i32,
-        float: f64,
-        string: []const u8,
-        boolean: bool,
-        nil: void,
-
-        pub fn format(value: *const Value, w: *Io.Writer) Io.Writer.Error!void {
-            try switch (value.*) {
-                .integer => |i| w.print("{}", .{i}),
-                .float => |i| w.print("{d:.3}", .{i}),
-                .string => |i| w.print("{s}", .{i}),
-                .boolean => |i| w.print("{}", .{i}),
-                .nil => w.print("nil", .{}),
-            };
+        pub fn format(expr: *const Binary, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("({f} {s} {f})", .{ expr.left, expr.operator.lexeme, expr.right });
         }
+    };
 
-        pub fn fromAst(ast_val: Ast.Literal.Value) Value {
-            return switch (ast_val) {
-                .integer => |x| .{ .integer = x },
-                .float => |x| .{ .float = x },
-                .string => |x| .{ .string = x },
-                .boolean => |x| .{ .boolean = x },
-                .nil => .nil,
+    pub const Unary = struct {
+        operator: Token,
+        expr: *Expr,
+
+        pub fn format(expr: *const Unary, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("({s}{f})", .{ expr.operator.lexeme, expr.expr });
+        }
+    };
+
+    pub const Cast = struct {
+        token: Token,
+        expr: *Expr,
+
+        pub fn format(expr: *const Cast, w: *Io.Writer) Io.Writer.Error!void {
+            const target = switch (expr.token.type) {
+                .kw_float => "float",
+                .kw_int => "int",
+                else => unreachable,
+            };
+            try w.print("{s}({f})", .{ target, expr.expr });
+        }
+    };
+
+    pub const Literal = struct {
+        pub const Value = union(enum) {
+            integer: i32,
+            float: f64,
+            string: []const u8,
+            boolean: bool,
+            nil: void,
+
+            pub fn format(value: *const Value, w: *Io.Writer) Io.Writer.Error!void {
+                try switch (value.*) {
+                    .integer => |i| w.print("{}", .{i}),
+                    .float => |i| w.print("{d:.3}", .{i}),
+                    .string => |i| w.print("{s}", .{i}),
+                    .boolean => |i| w.print("{}", .{i}),
+                    .nil => w.print("nil", .{}),
+                };
+            }
+
+            pub fn fromAst(ast_val: Ast.Expr.Literal.Value) Value {
+                return switch (ast_val) {
+                    .integer => |x| .{ .integer = x },
+                    .float => |x| .{ .float = x },
+                    .string => |x| .{ .string = x },
+                    .boolean => |x| .{ .boolean = x },
+                    .nil => .nil,
+                };
+            }
+        };
+
+        value: Value,
+        token: Token,
+
+        pub fn format(expr: *const Literal, w: *Io.Writer) Io.Writer.Error!void {
+            try switch (expr.value) {
+                .string => |s| w.print("\"{s}\"", .{s}),
+                else => w.print("{f}", .{expr.value}),
             };
         }
     };
 
-    value: Value,
-    token: Token,
+    pub const Grouping = struct {
+        paren: Token,
+        expr: *Expr,
 
-    pub fn format(expr: *const Literal, w: *Io.Writer) Io.Writer.Error!void {
-        try switch (expr.value) {
-            .string => |s| w.print("\"{s}\"", .{s}),
-            else => w.print("{f}", .{expr.value}),
-        };
-    }
-};
+        pub fn format(expr: *const Grouping, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("({f})", .{expr.expr});
+        }
+    };
 
-pub const Grouping = struct {
-    paren: Token,
-    expr: *Expr,
-
-    pub fn format(expr: *const Grouping, w: *Io.Writer) Io.Writer.Error!void {
-        try w.print("({f})", .{expr.expr});
-    }
-};
-
-pub const Expr = struct {
     type: NormType,
     kind: union(enum) {
         binary: Binary,

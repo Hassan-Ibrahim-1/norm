@@ -9,122 +9,11 @@ const dbg = debug.dbg;
 const ers = @import("errors.zig");
 const Lexer = @import("Lexer.zig");
 const Token = Lexer.Token;
+const Ast = @import("Ast.zig");
 
 fn oom() noreturn {
     @panic("oom");
 }
-
-pub const Ast = struct {
-    pub const Binary = struct {
-        left: *Expr,
-        operator: Token,
-        right: *Expr,
-
-        pub fn format(expr: *const Binary, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("({f} {s} {f})", .{ expr.left, expr.operator.lexeme, expr.right });
-        }
-    };
-
-    pub const Unary = struct {
-        operator: Token,
-        expr: *Expr,
-
-        pub fn format(expr: *const Unary, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("({s}{f})", .{ expr.operator.lexeme, expr.expr });
-        }
-    };
-
-    pub const Cast = struct {
-        token: Token,
-        expr: *Expr,
-
-        pub fn format(expr: *const Cast, w: *Io.Writer) Io.Writer.Error!void {
-            const target = switch (expr.token.type) {
-                .kw_float => "float",
-                .kw_int => "int",
-                else => unreachable,
-            };
-            try w.print("{s}({f})", .{ target, expr.expr });
-        }
-    };
-
-    pub const Literal = struct {
-        pub const Value = union(enum) {
-            integer: i32,
-            float: f64,
-            string: []const u8,
-            boolean: bool,
-            nil: void,
-
-            pub fn format(value: *const Value, w: *Io.Writer) Io.Writer.Error!void {
-                try switch (value.*) {
-                    .integer => |i| w.print("{}", .{i}),
-                    .float => |i| w.print("{d:.3}", .{i}),
-                    .string => |i| w.print("{s}", .{i}),
-                    .boolean => |i| w.print("{}", .{i}),
-                    .nil => w.print("nil", .{}),
-                };
-            }
-        };
-
-        value: Value,
-        token: Token,
-
-        pub fn format(expr: *const Literal, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{f}", .{expr.value});
-        }
-    };
-
-    pub const Grouping = struct {
-        paren: Token,
-        expr: *Expr,
-
-        pub fn format(expr: *const Grouping, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{f}", .{expr.expr});
-        }
-    };
-
-    pub const Expr = union(enum) {
-        binary: Binary,
-        unary: Unary,
-        cast: Cast,
-        grouping: Grouping,
-        literal: Literal,
-
-        pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
-            // _ = debug.dbgw(w, "", expr);
-            try switch (expr.*) {
-                inline else => |b| w.print("{f}", .{b}),
-            };
-        }
-    };
-
-    arena: std.heap.ArenaAllocator,
-    expr: *Expr,
-    errors: []Diagnostics,
-};
-
-pub const Diagnostics = struct {
-    line: u32,
-    hints: []const []const u8 = &.{},
-    notes: []const []const u8 = &.{},
-    error_msg: []const u8,
-
-    pub fn promote(
-        d: *const Diagnostics,
-        file_name: []const u8,
-        source: []const u8,
-    ) ers.Diagnostics {
-        return .{
-            .error_msg = d.error_msg,
-            .line = d.line,
-            .notes = d.notes,
-            .hints = d.hints,
-            .file_name = file_name,
-            .source = source,
-        };
-    }
-};
 
 const Parser = struct {
     arena: std.heap.ArenaAllocator,
@@ -133,7 +22,7 @@ const Parser = struct {
     previous: Token,
     // TODO: reset on statement boundary
     panic_mode: bool,
-    errors: std.ArrayList(Diagnostics),
+    errors: std.ArrayList(Ast.Diagnostics),
 
     const Precedence = enum {
         lowest,
@@ -354,7 +243,7 @@ const Parser = struct {
         p.next();
     }
 
-    fn reportError(p: *Parser, diag: Diagnostics) void {
+    fn reportError(p: *Parser, diag: Ast.Diagnostics) void {
         if (p.panic_mode) return;
         p.errors.append(p.arena.allocator(), diag) catch oom();
         p.panic_mode = true;
@@ -397,7 +286,7 @@ fn makeBinary(arena: Allocator, left: *Ast.Expr, operator: Token, right: *Ast.Ex
     return e;
 }
 
-fn makeLiteral(arena: Allocator, value: Ast.Literal.Value, token: Token) *Ast.Expr {
+fn makeLiteral(arena: Allocator, value: Ast.Expr.Literal.Value, token: Token) *Ast.Expr {
     const e = makeExpr(arena);
     e.* = .{ .literal = .{ .token = token, .value = value } };
     return e;

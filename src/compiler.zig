@@ -188,7 +188,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn binary(c: *Compiler, b: *Nir.Binary) void {
+    fn binary(c: *Compiler, b: *Nir.Expr.Binary) void {
         c.expression(b.left);
         c.expression(b.right);
 
@@ -253,7 +253,7 @@ pub const Compiler = struct {
         c.emitOpCode(op_code, line);
     }
 
-    fn unary(c: *Compiler, u: *Nir.Unary) void {
+    fn unary(c: *Compiler, u: *Nir.Expr.Unary) void {
         c.expression(u.expr);
         const line = u.operator.line;
         const ty = u.expr.type;
@@ -271,7 +271,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn cast(c: *Compiler, cst: *Nir.Cast, target: NormType) void {
+    fn cast(c: *Compiler, cst: *Nir.Expr.Cast, target: NormType) void {
         c.expression(cst.expr);
         const line = cst.token.line;
         const op_code: OpCode = switch (target) {
@@ -282,11 +282,11 @@ pub const Compiler = struct {
         c.emitOpCode(op_code, line);
     }
 
-    fn grouping(c: *Compiler, g: *Nir.Grouping) void {
+    fn grouping(c: *Compiler, g: *Nir.Expr.Grouping) void {
         c.expression(g.expr);
     }
 
-    fn literal(c: *Compiler, l: *Nir.Literal) void {
+    fn literal(c: *Compiler, l: *Nir.Expr.Literal) void {
         switch (l.value) {
             .float => |f| c.compiling_chunk.writeConstant(.{ .float = f }, l.token.line),
             .integer => |i| c.compiling_chunk.writeConstant(.{ .integer = i }, l.token.line),
