@@ -46,7 +46,7 @@ pub const Stmt = union(enum) {
         expr: *Expr,
     };
 
-    expr: Expression,
+    expression: Expression,
     var_decl: VarDecl,
     var_assign: VarAssign,
 };
@@ -135,5 +135,5 @@ pub const Expr = union(enum) {
 };
 
 arena: std.heap.ArenaAllocator,
-expr: *Expr,
+stmts: []Stmt,
 errors: []Diagnostics,

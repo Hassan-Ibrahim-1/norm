@@ -348,7 +348,7 @@ pub fn analyze(gpa: Allocator, ast: *Ast) Nir {
     if (ast.errors.len > 0) return undefined;
 
     var sema = Sema.init(gpa);
-    const nir_expr = sema.expression(ast.expr);
+    const nir_expr = sema.expression(ast.stmts[0].expression.expr);
     const errors = sema.errors.toOwnedSlice(sema.arena.allocator()) catch oom();
     return .{
         .arena = sema.arena,

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const Io = std.Io;
@@ -124,6 +125,64 @@ const Parser = struct {
         return parser;
     }
 
+    fn statement(p: *Parser) Ast.Stmt {
+        if (p.match(.identifier)) {
+            if (p.checkEither(.colon, .colon_equal)) {
+                return p.varDecl();
+            }
+            p.reportError(.{ .error_msg = "idk man", .line = p.previous.line });
+        }
+        return p.expressionStmt();
+    }
+
+    fn expressionStmt(p: *Parser) Ast.Stmt {
+        const expr = p.expression(.lowest);
+
+        if (!builtin.is_test) {
+            p.consumeSemicolon();
+        }
+
+        return .{
+            .expression = .{ .expr = expr },
+        };
+    }
+
+    fn varDecl(p: *Parser) Ast.Stmt {
+        const ident = p.previous;
+
+        var type_expr: ?*Ast.Expr = null;
+        if (p.match(.colon)) {
+            type_expr = p.expression(.lowest);
+            if (!p.match(.equal)) {
+                p.consumeSemicolon();
+                return .{
+                    .var_decl = .{
+                        .ident = ident,
+                        .type_expr = type_expr,
+                        .value = null,
+                    },
+                };
+            }
+        } else {
+            p.consume(.colon_equal, "unreachable");
+        }
+
+        const value = p.expression(.lowest);
+        p.consumeSemicolon();
+
+        return .{
+            .var_decl = .{
+                .ident = ident,
+                .type_expr = type_expr,
+                .value = value,
+            },
+        };
+    }
+
+    fn consumeSemicolon(p: *Parser) void {
+        p.consume(.semicolon, "Expect ';' after statement");
+    }
+
     fn expression(p: *Parser, precedence: Precedence) *Ast.Expr {
         const rule = getRule(p.previous.type);
         const prefix = rule.prefix orelse {
@@ -148,10 +207,6 @@ const Parser = struct {
 
     fn peekPrecedence(p: *Parser) Precedence {
         return getRule(p.current.type).precedence;
-    }
-
-    fn check(p: *Parser, ty: Token.Type) bool {
-        return p.current.type == ty;
     }
 
     fn grouping(p: *Parser) *Ast.Expr {
@@ -243,6 +298,24 @@ const Parser = struct {
         p.next();
     }
 
+    fn check(p: *Parser, ty: Token.Type) bool {
+        return p.current.type == ty;
+    }
+
+    fn checkEither(p: *Parser, a: Token.Type, b: Token.Type) bool {
+        return p.current.type == a or p.current.type == b;
+    }
+
+    fn match(p: *Parser, ty: Token.Type) bool {
+        if (!p.check(ty)) return false;
+        p.next();
+        return true;
+    }
+
+    fn matchEither(p: *Parser, a: Token.Type, b: Token.Type) bool {
+        return p.match(a) or p.match(b);
+    }
+
     fn reportError(p: *Parser, diag: Ast.Diagnostics) void {
         if (p.panic_mode) return;
         p.errors.append(p.arena.allocator(), diag) catch oom();
@@ -253,12 +326,21 @@ const Parser = struct {
 /// `arena.deinit` must be called even if expr is null
 pub fn parse(gpa: Allocator, l: *Lexer) Ast {
     var p = Parser.init(gpa, l);
-    const expr = p.expression(.lowest);
-    const errors = p.errors.toOwnedSlice(p.arena.allocator()) catch oom();
+    const arena = p.arena.allocator();
+
+    var stmts: std.ArrayList(Ast.Stmt) = .empty;
+
+    while (true) {
+        const stmt = p.statement();
+        stmts.append(arena, stmt) catch oom();
+
+        if (p.current.type == .eof) break;
+    }
+
     return .{
         .arena = p.arena,
-        .errors = errors,
-        .expr = expr,
+        .errors = p.errors.items,
+        .stmts = stmts.items,
     };
 }
 
@@ -301,11 +383,11 @@ fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
     var ast = parse(gpa, &l);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
-        _ = dbg("ast.errors", ast.errors);
+        dbg("ast.errors", ast.errors);
         return error.ParserError;
     }
 
-    const expr = ast.expr;
+    const expr = ast.stmts[0].expression.expr;
     var aw = Io.Writer.Allocating.init(gpa);
     try expr.format(&aw.writer);
 
