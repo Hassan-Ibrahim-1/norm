@@ -329,7 +329,7 @@ pub fn compile(gpa: Allocator, nir: *Nir) Chunk {
     var chunk: Chunk = .init(gpa);
     var c: Compiler = .init(gpa, &chunk);
 
-    const expr = nir.expr;
+    const expr = nir.stmts[0].expression.expr;
     c.expression(expr);
 
     c.emitOpCode(.op_return, 0);
@@ -390,7 +390,7 @@ fn testCompile(gpa: Allocator, source: []const u8) !Chunk {
     }
 
     var nir = sema.analyze(gpa, &ast);
-    defer nir.arena.deinit();
+    defer nir.deinit();
 
     if (nir.errors.len > 0) {
         debug.reportErrors(nir.errors, "test_runner", source);

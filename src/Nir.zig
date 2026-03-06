@@ -31,6 +31,12 @@ pub const Symbol = struct {
 };
 
 pub const SymbolTable = struct {
+    gpa: Allocator,
+    top: SymMap,
+    scope_arena: std.heap.ArenaAllocator,
+    locals: std.ArrayList(Locals),
+    top_scope: *Scope,
+
     pub const SymMap = std.StringHashMapUnmanaged(Symbol);
 
     pub const Locals = struct {
@@ -38,17 +44,54 @@ pub const SymbolTable = struct {
         locals: SymMap,
     };
 
-    top: SymMap,
-    locals: std.ArrayList(Locals),
+    pub fn init(gpa: Allocator) SymbolTable {
+        var scope_arena: std.heap.ArenaAllocator = .init(gpa);
+        const top_scope = scope_arena.allocator().create(Scope) catch oom();
+        top_scope.* = .{
+            .parent = undefined,
+            .level = .top,
+        };
+
+        return .{
+            .gpa = gpa,
+            .scope_arena = scope_arena,
+            .top_scope = top_scope,
+            .top = .empty,
+            .locals = .empty,
+        };
+    }
+
+    pub fn deinit(st: *SymbolTable) void {
+        st.scope_arena.deinit();
+        st.* = undefined;
+    }
+
+    pub fn registerGlobal(st: *SymbolTable, name: []const u8, ty: NormType) void {
+        const sym: Symbol = .{ .type = ty, .scope = st.top_scope };
+        st.registerSym(name, sym);
+    }
+
+    fn registerSym(st: *SymbolTable, name: []const u8, sym: Symbol) void {
+        st.top.put(st.gpa, name, sym) catch oom();
+    }
+
+    fn newScope(st: *SymbolTable, scope_level: Scope.Level, parent: *Scope) *Scope {
+        const scope = st.scope_arena.allocator().create(Scope) catch oom();
+        scope.* = .{
+            .scope_level = scope_level,
+            .parent = parent,
+        };
+        return scope;
+    }
 };
 
 pub const NormType = enum {
+    n_invalid,
+
     n_int,
     n_float,
     n_bool,
     n_string,
-
-    n_invalid,
 
     pub fn format(nt: NormType, w: *Io.Writer) Io.Writer.Error!void {
         try w.print("{s}", .{@tagName(nt)[2..]});
@@ -93,7 +136,7 @@ pub const NormType = enum {
     }
 };
 
-pub const Stmt = struct {
+pub const Stmt = union(enum) {
     pub const Expression = struct {
         expr: *Expr,
 
@@ -104,8 +147,8 @@ pub const Stmt = struct {
 
     pub const VarDecl = struct {
         ident: Token,
-        // At least one of the below in non-null
-        type_expr: ?*Expr,
+        type: NormType,
+        // sema could possibly automatically set this to the zero value
         value: ?*Expr,
 
         pub fn format(vd: *const Stmt.VarDecl, w: *Io.Writer) Io.Writer.Error!void {
@@ -287,7 +330,17 @@ pub const Diagnostics = struct {
     }
 };
 
+pub fn deinit(self: *@This()) void {
+    self.arena.deinit();
+    self.sym_table.deinit();
+    self.* = undefined;
+}
+
 arena: std.heap.ArenaAllocator,
-expr: *Expr,
+stmts: []Stmt,
 sym_table: SymbolTable,
 errors: []Diagnostics,
+
+fn oom() noreturn {
+    @panic("oom");
+}

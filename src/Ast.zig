@@ -160,6 +160,17 @@ pub const Expr = union(enum) {
     literal: Literal,
     identifier: Identifier,
 
+    pub fn token(e: *const Expr) Token {
+        return switch (e.*) {
+            .binary => |b| b.operator,
+            .unary => |b| b.operator,
+            .cast => |b| b.token,
+            .grouping => |b| b.paren,
+            .literal => |b| b.token,
+            .identifier => |b| b.ident,
+        };
+    }
+
     pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
         try switch (expr.*) {
             inline else => |b| w.print("{f}", .{b}),

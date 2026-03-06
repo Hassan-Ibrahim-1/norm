@@ -102,9 +102,10 @@ const Parser = struct {
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _switch
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _enum
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // range
-        .{ .prefix = cast, .infix = null, .precedence = .lowest }, // kw_int
-        .{ .prefix = cast, .infix = null, .precedence = .lowest }, // kw_float
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_bool
+        .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_int
+        .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_float
+        .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_bool
+        .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_string
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _error
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // eof,
     };
@@ -241,6 +242,11 @@ const Parser = struct {
         // same goes for the `float` function
         const value = std.fmt.parseInt(i32, p.previous.lexeme, 10) catch unreachable;
         return makeLiteral(p.arena, .{ .integer = value }, p.previous);
+    }
+
+    fn typeKw(p: *Parser) *Ast.Expr {
+        if (p.check(.left_paren)) return p.cast();
+        return makeIdentifier(p.arena, p.previous);
     }
 
     fn cast(p: *Parser) *Ast.Expr {

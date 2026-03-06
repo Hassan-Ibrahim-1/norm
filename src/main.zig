@@ -87,14 +87,14 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
         }
 
         var nir = sema.analyze(gpa, &ast);
-        defer nir.arena.deinit();
+        defer nir.deinit();
         if (nir.errors.len > 0) {
             for (nir.errors) |diag| {
                 try stderr.print("{s}\n", .{diag.error_msg});
             }
             continue;
         }
-        try stderr.print("[sema]: {f}\n", .{nir.expr});
+        try stderr.print("[sema]: {any}\n", .{nir.stmts});
 
         var chunk = compiler.compile(gpa, &nir);
         defer chunk.deinit();

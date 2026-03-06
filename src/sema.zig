@@ -78,11 +78,12 @@ fn makeExpr(arena: Allocator) *Nir.Expr {
 }
 
 const Sema = struct {
-    arena: std.heap.ArenaAllocator,
+    arena: Allocator,
     errors: std.ArrayList(Nir.Diagnostics),
     // TODO: reset on statement boundary
     panic_mode: bool,
     invalid: *Nir.Expr,
+    sym_table: Nir.SymbolTable,
 
     const TypeMask = u64;
 
@@ -109,15 +110,81 @@ const Sema = struct {
         @panic("hmm");
     }
 
-    fn init(gpa: Allocator) Sema {
-        var arena = std.heap.ArenaAllocator.init(gpa);
-        const invalid = makeInvalid(arena.allocator());
+    fn init(gpa: Allocator, arena: Allocator) Sema {
         return .{
-            .invalid = invalid,
+            .invalid = makeInvalid(arena),
+            .sym_table = .init(gpa),
             .arena = arena,
             .errors = .empty,
             .panic_mode = false,
         };
+    }
+
+    fn analyzeTypeExpr(s: *Sema, expr: *Ast.Expr) NormType {
+        // TODO: support struct/enum expressions
+        if (expr.* != .identifier) {
+            return s.expectedTypeExprErr(expr);
+        }
+
+        return switch (expr.identifier.ident.type) {
+            .kw_int => .n_int,
+            .kw_float => .n_float,
+            .kw_string => .n_string,
+            .kw_bool => .n_bool,
+
+            .identifier => @panic("todo"),
+            else => unreachable,
+        };
+    }
+
+    fn analyzeGlobalSymbols(s: *Sema, stmts: []Ast.Stmt) void {
+        for (stmts) |stmt| {
+            switch (stmt) {
+                .var_decl => |vd| {
+                    const var_type = s.analyzeTypeExpr(vd.type_expr orelse @panic("todo"));
+                    s.sym_table.registerGlobal(vd.ident.lexeme, var_type);
+                },
+                else => {},
+            }
+        }
+    }
+
+    fn analyze(s: *Sema, stmts: []Ast.Stmt) []Nir.Stmt {
+        s.analyzeGlobalSymbols(stmts);
+
+        var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
+
+        for (stmts) |stmt| {
+            const nir_stmt = s.statement(stmt);
+            nir_stmts.append(s.arena, nir_stmt) catch oom();
+        }
+
+        return nir_stmts.items;
+    }
+
+    fn statement(s: *Sema, stmt: Ast.Stmt) Nir.Stmt {
+        switch (stmt) {
+            .expression => |expr_stmt| {
+                const nir_expr = s.expression(expr_stmt.expr);
+                return .{ .expression = .{ .expr = nir_expr } };
+            },
+            .var_decl => |vd| {
+                // FIXME: shouldn't assume top scope
+                const sym = s.sym_table.top.get(vd.ident.lexeme).?;
+                const value = if (vd.value) |v| s.expression(v) else @panic("todo: zero values");
+                return .{ .var_decl = .{ .ident = vd.ident, .value = value, .type = sym.type } };
+            },
+            .var_assign => @panic("todo"),
+        }
+    }
+
+    fn expectedTypeExprErr(s: *Sema, expr: *Ast.Expr) NormType {
+        s.reportErrorAst(
+            expr,
+            "Expected type identifier found {f}. TODO: support struct/enum expressions",
+            .{expr},
+        );
+        return .n_invalid;
     }
 
     fn expression(s: *Sema, expr: *Ast.Expr) *Nir.Expr {
@@ -133,7 +200,7 @@ const Sema = struct {
 
     fn tryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
         if (expr.type == target) return expr;
-        const arena = s.arena.allocator();
+        const arena = s.arena;
         if (canCast(expr.type, target)) {
             return makeAnonCast(arena, expr, target);
         }
@@ -143,7 +210,7 @@ const Sema = struct {
     fn binary(s: *Sema, b: *Ast.Expr.Binary) *Nir.Expr {
         const left = s.expression(b.left);
         const right = s.expression(b.right);
-        const arena = s.arena.allocator();
+        const arena = s.arena;
 
         switch (b.operator.type) {
             .plus => {
@@ -222,7 +289,7 @@ const Sema = struct {
     }
 
     fn unary(s: *Sema, u: *Ast.Expr.Unary) *Nir.Expr {
-        const arena = s.arena.allocator();
+        const arena = s.arena;
         const expr = s.expression(u.expr);
         switch (u.operator.type) {
             .minus => {
@@ -242,7 +309,7 @@ const Sema = struct {
     }
 
     fn cast(s: *Sema, c: *Ast.Expr.Cast) *Nir.Expr {
-        const arena = s.arena.allocator();
+        const arena = s.arena;
 
         const expr = s.expression(c.expr);
         if (expr.type == .n_invalid) return s.invalid;
@@ -265,7 +332,7 @@ const Sema = struct {
     fn grouping(s: *Sema, g: *Ast.Expr.Grouping) *Nir.Expr {
         const expr = s.expression(g.expr);
         if (expr.type == .n_invalid) return s.invalid;
-        return makeGrouping(s.arena.allocator(), expr, g.paren, expr.type);
+        return makeGrouping(s.arena, expr, g.paren, expr.type);
     }
 
     fn literal(s: *Sema, l: *Ast.Expr.Literal) *Nir.Expr {
@@ -276,7 +343,7 @@ const Sema = struct {
             .string => .n_string,
             .nil => @panic("todo"),
         };
-        return makeLiteral(s.arena.allocator(), .fromAst(l.value), l.token, ty);
+        return makeLiteral(s.arena, .fromAst(l.value), l.token, ty);
     }
 
     fn expectType(
@@ -322,16 +389,22 @@ const Sema = struct {
         return false;
     }
 
-    fn diag(s: *Sema, expr: *Nir.Expr, comptime error_msg: []const u8, args: anytype) Nir.Diagnostics {
+    fn diag(s: *Sema, line: u32, comptime error_msg: []const u8, args: anytype) Nir.Diagnostics {
         return .{
-            .error_msg = std.fmt.allocPrint(s.arena.allocator(), error_msg, args) catch oom(),
-            .line = expr.token().line,
+            .error_msg = std.fmt.allocPrint(s.arena, error_msg, args) catch oom(),
+            .line = line,
         };
     }
 
     fn reportError(s: *Sema, expr: *Nir.Expr, comptime error_msg: []const u8, args: anytype) void {
         if (s.panic_mode) return;
-        s.errors.append(s.arena.allocator(), s.diag(expr, error_msg, args)) catch oom();
+        s.errors.append(s.arena, s.diag(expr.token().line, error_msg, args)) catch oom();
+        s.panic_mode = true;
+    }
+
+    fn reportErrorAst(s: *Sema, expr: *Ast.Expr, comptime error_msg: []const u8, args: anytype) void {
+        if (s.panic_mode) return;
+        s.errors.append(s.arena, s.diag(expr.token().line, error_msg, args)) catch oom();
         s.panic_mode = true;
     }
 
@@ -348,14 +421,17 @@ fn oom() noreturn {
 pub fn analyze(gpa: Allocator, ast: *Ast) Nir {
     if (ast.errors.len > 0) return undefined;
 
-    var sema = Sema.init(gpa);
-    const nir_expr = sema.expression(ast.stmts[0].expression.expr);
-    const errors = sema.errors.toOwnedSlice(sema.arena.allocator()) catch oom();
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+
+    var sema = Sema.init(gpa, arena.allocator());
+
+    const stmts = sema.analyze(ast.stmts);
+
     return .{
-        .arena = sema.arena,
-        .errors = errors,
-        .expr = nir_expr,
-        .sym_table = undefined,
+        .arena = arena,
+        .errors = sema.errors.items,
+        .stmts = stmts,
+        .sym_table = sema.sym_table,
     };
 }
 
@@ -383,14 +459,14 @@ fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
     }
 
     var nir = analyze(gpa, &ast);
-    defer nir.arena.deinit();
+    defer nir.deinit();
     if (nir.errors.len > 0) {
         debug.reportErrors(nir.errors, "test_runner", source);
         return error.SemaFailed;
     }
 
     var aw = Io.Writer.Allocating.init(gpa);
-    try nir.expr.format(&aw.writer);
+    try nir.stmts[0].expression.expr.format(&aw.writer);
     return aw.toOwnedSlice();
 }
 
@@ -413,10 +489,10 @@ fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
         return error.ParserError;
     }
 
-    const nir = analyze(gpa, &ast);
-    errdefer nir.arena.deinit();
+    var nir = analyze(gpa, &ast);
+    errdefer nir.deinit();
     if (nir.errors.len == 0) {
-        std.debug.print("sema passed with output=\"{f}\"\n", .{nir.expr});
+        std.debug.print("sema passed with output=\"{f}\"\n", .{nir.stmts[0].expression.expr});
         return error.SemaPassed;
     }
     return nir;
@@ -460,8 +536,8 @@ test "arithmetic failure" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
 
-        const nir = try testAnalyzeFailure(gpa, t.source);
-        defer nir.arena.deinit();
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
 
         try testing.expect(nir.errors.len == 1);
         try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
@@ -498,8 +574,8 @@ test "string concat failure" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
 
-        const nir = try testAnalyzeFailure(gpa, t.source);
-        defer nir.arena.deinit();
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
 
         try testing.expect(nir.errors.len == 1);
         try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
@@ -550,8 +626,8 @@ test "comparison failure" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
 
-        const nir = try testAnalyzeFailure(gpa, t.source);
-        defer nir.arena.deinit();
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
 
         try testing.expect(nir.errors.len == 1);
         try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
@@ -594,8 +670,8 @@ test "logical failure" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
 
-        const nir = try testAnalyzeFailure(gpa, t.source);
-        defer nir.arena.deinit();
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
 
         try testing.expect(nir.errors.len == 1);
         try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);

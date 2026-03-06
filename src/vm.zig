@@ -345,7 +345,7 @@ fn testRun(
     }
 
     var nir = sema.analyze(gpa, &ast);
-    defer nir.arena.deinit();
+    defer nir.deinit();
     if (nir.errors.len > 0) {
         debug.reportErrors(nir.errors, "test_runner", source);
         return error.SemaFailed;
@@ -390,7 +390,7 @@ fn testRunNoFree(
     }
 
     var nir = sema.analyze(gpa, &ast);
-    defer nir.arena.deinit();
+    defer nir.deinit();
     if (nir.errors.len > 0) {
         debug.reportErrors(nir.errors, "test_runner", source);
         return error.SemaFailed;
