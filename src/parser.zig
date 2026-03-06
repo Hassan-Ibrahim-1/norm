@@ -12,15 +12,17 @@ const Lexer = @import("Lexer.zig");
 const Token = Lexer.Token;
 const Ast = @import("Ast.zig");
 
-fn oom() noreturn {
-    @panic("oom");
-}
-
 const Parser = struct {
-    arena: std.heap.ArenaAllocator,
-    lexer: *Lexer,
-    current: Token,
+    arena: Allocator,
+    scratch: Allocator,
+    tokens: []Token,
+
+    current_index: usize,
+
     previous: Token,
+    current: Token,
+    next: Token,
+
     // TODO: reset on statement boundary
     panic_mode: bool,
     errors: std.ArrayList(Ast.Diagnostics),
@@ -79,7 +81,7 @@ const Parser = struct {
         .{ .prefix = null, .infix = binary, .precedence = .comparison }, // less
         .{ .prefix = null, .infix = binary, .precedence = .comparison }, // less_equal
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // equal_greater
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // identifier
+        .{ .prefix = identifier, .infix = null, .precedence = .lowest }, // identifier
         .{ .prefix = string, .infix = null, .precedence = .lowest }, // string
         .{ .prefix = float, .infix = null, .precedence = .lowest }, // float
         .{ .prefix = int, .infix = null, .precedence = .lowest }, // int
@@ -111,36 +113,36 @@ const Parser = struct {
         return &parse_rules[@intFromEnum(tt)];
     }
 
-    pub fn init(gpa: Allocator, l: *Lexer) Parser {
+    fn init(arena: Allocator, scratch: Allocator, tokens: []Token) Parser {
         var parser: Parser = .{
-            .arena = .init(gpa),
-            .lexer = l,
-            .current = undefined,
-            .previous = undefined,
+            .arena = arena,
+            .scratch = scratch,
+            .tokens = tokens,
+            .current_index = 0,
+            .previous = tokens[0],
+            .current = tokens[0],
+            .next = tokens[0],
             .panic_mode = false,
             .errors = .empty,
         };
-        parser.next();
-        parser.next();
+        parser.advance();
         return parser;
     }
 
     fn statement(p: *Parser) Ast.Stmt {
-        if (p.match(.identifier)) {
-            if (p.checkEither(.colon, .colon_equal)) {
+        if (p.check(.identifier)) {
+            if (p.checkNextEither(.colon, .colon_equal)) {
+                p.advance();
                 return p.varDecl();
             }
-            p.reportError(.{ .error_msg = "idk man", .line = p.previous.line });
+            // p.reportError(.{ .error_msg = "idk man", .line = p.previous.line });
         }
         return p.expressionStmt();
     }
 
     fn expressionStmt(p: *Parser) Ast.Stmt {
         const expr = p.expression(.lowest);
-
-        if (!builtin.is_test) {
-            p.consumeSemicolon();
-        }
+        p.consumeSemicolon();
 
         return .{
             .expression = .{ .expr = expr },
@@ -180,10 +182,16 @@ const Parser = struct {
     }
 
     fn consumeSemicolon(p: *Parser) void {
+        if (builtin.is_test) {
+            _ = p.match(.semicolon);
+            return;
+        }
         p.consume(.semicolon, "Expect ';' after statement");
     }
 
     fn expression(p: *Parser, precedence: Precedence) *Ast.Expr {
+        p.advance();
+
         const rule = getRule(p.previous.type);
         const prefix = rule.prefix orelse {
             p.reportError(.{
@@ -199,7 +207,7 @@ const Parser = struct {
         while (!p.check(.semicolon) and precedence.int() < p.peekPrecedence().int()) {
             const infix_rule = getRule(p.current.type);
             const infix = infix_rule.infix orelse return expr;
-            p.next();
+            p.advance();
             expr = infix(p, expr);
         }
         return expr;
@@ -211,22 +219,20 @@ const Parser = struct {
 
     fn grouping(p: *Parser) *Ast.Expr {
         const paren = p.previous;
-        p.next();
         const expr = p.expression(.lowest);
         p.consume(.right_paren, "Expect ')' after expression.");
-        return makeGrouping(p.arena.allocator(), expr, paren);
+        return makeGrouping(p.arena, expr, paren);
     }
 
     fn unary(p: *Parser) *Ast.Expr {
         const operator = p.previous;
-        p.next();
         const expr = p.expression(.unary);
-        return makeUnary(p.arena.allocator(), expr, operator);
+        return makeUnary(p.arena, expr, operator);
     }
 
     fn float(p: *Parser) *Ast.Expr {
         const value = std.fmt.parseFloat(f32, p.previous.lexeme) catch unreachable;
-        return makeLiteral(p.arena.allocator(), .{ .float = value }, p.previous);
+        return makeLiteral(p.arena, .{ .float = value }, p.previous);
     }
 
     fn int(p: *Parser) *Ast.Expr {
@@ -234,17 +240,16 @@ const Parser = struct {
         // what happens if you negate the largest integer?
         // same goes for the `float` function
         const value = std.fmt.parseInt(i32, p.previous.lexeme, 10) catch unreachable;
-        return makeLiteral(p.arena.allocator(), .{ .integer = value }, p.previous);
+        return makeLiteral(p.arena, .{ .integer = value }, p.previous);
     }
 
     fn cast(p: *Parser) *Ast.Expr {
         const cast_target = p.previous;
         p.consume(.left_paren, "Expect '(' before cast expression.");
-        p.next();
         const expr = p.expression(.lowest);
         p.consume(.right_paren, "Expect ')' after cast expression.");
 
-        return makeCast(p.arena.allocator(), expr, cast_target);
+        return makeCast(p.arena, expr, cast_target);
     }
 
     fn boolean(p: *Parser) *Ast.Expr {
@@ -253,49 +258,45 @@ const Parser = struct {
             .kw_false => false,
             else => unreachable,
         };
-        return makeLiteral(p.arena.allocator(), .{ .boolean = value }, p.previous);
+        return makeLiteral(p.arena, .{ .boolean = value }, p.previous);
     }
 
     fn nil(p: *Parser) *Ast.Expr {
-        return makeLiteral(p.arena.allocator(), .nil, p.previous);
+        return makeLiteral(p.arena, .nil, p.previous);
     }
 
     fn string(p: *Parser) *Ast.Expr {
         // remove the quotes around the string
         const strval = p.previous.lexeme[1 .. p.previous.lexeme.len - 1];
-        return makeLiteral(p.arena.allocator(), .{ .string = strval }, p.previous);
+        return makeLiteral(p.arena, .{ .string = strval }, p.previous);
     }
 
     fn binary(p: *Parser, left: *Ast.Expr) *Ast.Expr {
         const operator = p.previous;
         const prec = getRule(operator.type).precedence;
-        p.next();
         const right = p.expression(prec);
-        return makeBinary(p.arena.allocator(), left, operator, right);
+        return makeBinary(p.arena, left, operator, right);
     }
 
-    fn next(p: *Parser) void {
-        p.previous = p.current;
+    fn identifier(p: *Parser) *Ast.Expr {
+        return makeIdentifier(p.arena, p.previous);
+    }
 
-        while (true) {
-            p.current = p.lexer.scanToken();
-            if (p.current.type != ._error) break;
-            p.reportError(.{
-                .error_msg = p.current.lexeme,
-                .line = p.current.line,
-            });
-        }
+    fn advance(p: *Parser) void {
+        if (p.current_index < p.tokens.len - 1) p.current_index += 1;
+
+        p.previous = p.current;
+        p.current = p.next;
+        p.next = p.tokens[p.current_index];
     }
 
     fn consume(p: *Parser, expected: Token.Type, msg: []const u8) void {
-        if (p.current.type != expected) {
-            p.reportError(.{
-                .error_msg = msg,
-                .line = p.current.line,
-            });
-            return;
-        }
-        p.next();
+        if (p.match(expected)) return;
+
+        p.reportError(.{
+            .error_msg = msg,
+            .line = p.current.line,
+        });
     }
 
     fn check(p: *Parser, ty: Token.Type) bool {
@@ -306,9 +307,17 @@ const Parser = struct {
         return p.current.type == a or p.current.type == b;
     }
 
+    fn checkNext(p: *Parser, ty: Token.Type) bool {
+        return p.next.type == ty;
+    }
+
+    fn checkNextEither(p: *Parser, a: Token.Type, b: Token.Type) bool {
+        return p.next.type == a or p.next.type == b;
+    }
+
     fn match(p: *Parser, ty: Token.Type) bool {
         if (!p.check(ty)) return false;
-        p.next();
+        p.advance();
         return true;
     }
 
@@ -318,27 +327,36 @@ const Parser = struct {
 
     fn reportError(p: *Parser, diag: Ast.Diagnostics) void {
         if (p.panic_mode) return;
-        p.errors.append(p.arena.allocator(), diag) catch oom();
+        p.errors.append(p.arena, diag) catch oom();
         p.panic_mode = true;
     }
 };
 
 /// `arena.deinit` must be called even if expr is null
-pub fn parse(gpa: Allocator, l: *Lexer) Ast {
-    var p = Parser.init(gpa, l);
-    const arena = p.arena.allocator();
+pub fn parse(gpa: Allocator, tokens: []Token) Ast {
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+
+    var p = Parser.init(arena.allocator(), gpa, tokens);
 
     var stmts: std.ArrayList(Ast.Stmt) = .empty;
 
     while (true) {
         const stmt = p.statement();
-        stmts.append(arena, stmt) catch oom();
+        stmts.append(arena.allocator(), stmt) catch oom();
+
+        // dbg("parser", .{
+        //     .previous = p.previous,
+        //     .current = p.current,
+        //     .next = p.next,
+        //     .errors = p.errors.items,
+        //     .stmts = stmts,
+        // });
 
         if (p.current.type == .eof) break;
     }
 
     return .{
-        .arena = p.arena,
+        .arena = arena,
         .errors = p.errors.items,
         .stmts = stmts.items,
     };
@@ -347,6 +365,12 @@ pub fn parse(gpa: Allocator, l: *Lexer) Ast {
 fn makeGrouping(arena: Allocator, grping: *Ast.Expr, paren: Token) *Ast.Expr {
     const e = makeExpr(arena);
     e.* = .{ .grouping = .{ .paren = paren, .expr = grping } };
+    return e;
+}
+
+fn makeIdentifier(arena: Allocator, ident: Token) *Ast.Expr {
+    const e = makeExpr(arena);
+    e.* = .{ .identifier = .{ .ident = ident } };
     return e;
 }
 
@@ -378,13 +402,32 @@ fn makeExpr(arena: Allocator) *Ast.Expr {
     return arena.create(Ast.Expr) catch oom();
 }
 
+fn oom() noreturn {
+    @panic("oom");
+}
+
 fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
     var l = Lexer.init(source);
-    var ast = parse(gpa, &l);
+    const tokens = l.scanTokens(gpa);
+    defer {
+        gpa.free(tokens.tokens);
+        gpa.free(tokens.errors);
+    }
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.LexerError;
+    }
+
+    var ast = parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
         return error.ParserError;
+    }
+
+    if (ast.stmts.len > 1) {
+        dbg("ast.stmts", ast.stmts);
+        return error.TooManyStatements;
     }
 
     const expr = ast.stmts[0].expression.expr;
@@ -392,6 +435,28 @@ fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
     try expr.format(&aw.writer);
 
     return aw.toOwnedSlice();
+}
+
+fn testParseStmts(gpa: Allocator, source: []const u8) ![]const u8 {
+    var l = Lexer.init(source);
+    const tokens = l.scanTokens(gpa);
+    defer {
+        gpa.free(tokens.tokens);
+        gpa.free(tokens.errors);
+    }
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.LexerError;
+    }
+
+    var ast = parse(gpa, tokens.tokens);
+    defer ast.arena.deinit();
+    if (ast.errors.len > 0) {
+        dbg("ast.errors", ast.errors);
+        return error.ParserError;
+    }
+
+    return debug.printAstStmts(gpa, ast.stmts);
 }
 
 test "arithmetic expressions" {
@@ -501,6 +566,8 @@ test "arithmetic expressions" {
     };
 
     for (tests) |t| {
+        errdefer dbg("test case", t);
+
         const parsed = try testParse(gpa, t.source);
         defer gpa.free(parsed);
         try testing.expectEqualStrings(t.expected, parsed);
@@ -523,6 +590,8 @@ test "literals" {
     };
 
     for (tests) |t| {
+        errdefer dbg("test case", t);
+
         const parsed = try testParse(gpa, t.source);
         defer gpa.free(parsed);
         try testing.expectEqualStrings(t.expected, parsed);
@@ -543,6 +612,8 @@ test "comparison" {
     };
 
     for (tests) |t| {
+        errdefer dbg("test case", t);
+
         const parsed = try testParse(gpa, t.source);
         defer gpa.free(parsed);
         try testing.expectEqualStrings(t.expected, parsed);
@@ -567,6 +638,8 @@ test "logical" {
     };
 
     for (tests) |t| {
+        errdefer dbg("test case", t);
+
         const parsed = try testParse(gpa, t.source);
         defer gpa.free(parsed);
         try testing.expectEqualStrings(t.expected, parsed);
@@ -585,7 +658,89 @@ test "casting" {
     };
 
     for (tests) |t| {
+        errdefer dbg("test case", t);
+
         const parsed = try testParse(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
+
+test "identifier" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{ .source = "x", .expected = "x" },
+        .{ .source = "Map", .expected = "Map" },
+    };
+
+    for (tests) |t| {
+        errdefer dbg("test case", t);
+
+        const parsed = try testParse(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
+
+test "expression statement" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "2;",
+            .expected = "2;",
+        },
+        .{
+            .source = "2;3;",
+            .expected = "2;\n3;",
+        },
+        .{
+            .source = "2 + 3 < 4;",
+            .expected = "((2 + 3) < 4);",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer dbg("test case", t);
+
+        const parsed = try testParseStmts(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
+
+test "variable declaration" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "x := 10;",
+            .expected = "x := 10;",
+        },
+        .{
+            .source = "x: Number = 10;",
+            .expected = "x: Number = 10;",
+        },
+        .{
+            .source = "x: Number;",
+            .expected = "x: Number;",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer dbg("test case", t);
+
+        const parsed = try testParseStmts(gpa, t.source);
         defer gpa.free(parsed);
         try testing.expectEqualStrings(t.expected, parsed);
     }

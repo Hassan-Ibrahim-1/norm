@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const compiler = @import("compiler.zig");
+const Ast = @import("Ast.zig");
 const Chunk = compiler.Chunk;
 const OpCode = compiler.OpCode;
 const Io = std.Io;
@@ -160,4 +161,24 @@ pub fn reportErrors(errors: anytype, file_name: []const u8, source: []const u8) 
     for (errors) |diag| {
         ers.reportError(stderr, &diag.promote(file_name, source)) catch unreachable;
     }
+}
+
+const Allocator = mem.Allocator;
+
+pub fn printAstStmts(gpa: Allocator, stmts: []Ast.Stmt) []u8 {
+    var aw: Io.Writer.Allocating = .init(gpa);
+
+    for (stmts, 0..) |stmt, i| {
+        if (i == stmts.len - 1) {
+            aw.writer.print("{f}", .{stmt}) catch @panic("whoops");
+        } else {
+            aw.writer.print("{f}\n", .{stmt}) catch @panic("whoops");
+        }
+    }
+
+    return aw.toOwnedSlice() catch oom();
+}
+
+fn oom() noreturn {
+    @panic("oom");
 }

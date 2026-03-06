@@ -161,17 +161,59 @@ pub fn scanToken(l: *Lexer) Token {
     }
 }
 
-fn scanTokens(l: *Lexer, gpa: Allocator) Allocator.Error![]Token {
+fn oom() noreturn {
+    @panic("oom");
+}
+
+const ers = @import("errors.zig");
+
+pub const Diagnostics = struct {
+    line: u32,
+    error_msg: []const u8,
+
+    pub fn promote(
+        d: *const Diagnostics,
+        file_name: []const u8,
+        source: []const u8,
+    ) ers.Diagnostics {
+        return .{
+            .error_msg = d.error_msg,
+            .line = d.line,
+            .notes = d.notes,
+            .hints = d.hints,
+            .file_name = file_name,
+            .source = source,
+        };
+    }
+};
+
+pub const Tokens = struct {
+    tokens: []Token,
+    errors: []Diagnostics,
+};
+
+pub fn scanTokens(l: *Lexer, gpa: Allocator) Tokens {
     var tokens: std.ArrayList(Token) = .empty;
-    errdefer tokens.deinit(gpa);
+    defer tokens.deinit(gpa);
+
+    var errors: std.ArrayList(Diagnostics) = .empty;
+    defer errors.deinit(gpa);
 
     while (true) {
         const token = l.scanToken();
-        try tokens.append(gpa, token);
-        if (token.type == .eof) {
-            return tokens.toOwnedSlice(gpa);
+
+        if (token.type == ._error) {
+            errors.append(gpa, .{ .error_msg = token.lexeme, .line = token.line }) catch oom();
         }
+
+        tokens.append(gpa, token) catch oom();
+        if (token.type == .eof) break;
     }
+
+    return .{
+        .tokens = tokens.toOwnedSlice(gpa) catch oom(),
+        .errors = errors.toOwnedSlice(gpa) catch oom(),
+    };
 }
 
 fn string(l: *Lexer) Token {
@@ -409,9 +451,19 @@ fn dumpTokens(prefix: []const u8, tokens: []const Token) void {
     std.debug.print("}}\n", .{});
 }
 
-fn testScanTokens(gpa: Allocator, source: []const u8) Allocator.Error![]Token {
+const dbg = @import("debug.zig").dbg;
+
+fn testScanTokens(gpa: Allocator, source: []const u8) ![]Token {
     var l = Lexer.init(source);
-    return l.scanTokens(gpa);
+    const tokens = l.scanTokens(gpa);
+    defer gpa.free(tokens.errors);
+
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.ScanFailed;
+    }
+
+    return tokens.tokens;
 }
 
 test "simple" {
@@ -497,11 +549,12 @@ test "more tokens" {
 
         // Variable declaration
         .{
-            .source = "x := 10",
+            .source = "x := 10;",
             .expected = &.{
                 testToken("x", .identifier),
                 testToken(":=", .colon_equal),
                 testToken("10", .number_int),
+                testToken(";", .semicolon),
                 testToken("", .eof),
             },
         },

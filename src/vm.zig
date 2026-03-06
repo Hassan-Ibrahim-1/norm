@@ -318,6 +318,8 @@ fn oom() noreturn {
 
 const cast = @import("cast.zig");
 
+const dbg = debug.dbg;
+
 fn testRun(
     gpa: Allocator,
     source: []const u8,
@@ -325,12 +327,21 @@ fn testRun(
     stderr: *Io.Writer,
 ) !Value {
     var l = Lexer.init(source);
+    const tokens = l.scanTokens(gpa);
+    defer {
+        gpa.free(tokens.tokens);
+        gpa.free(tokens.errors);
+    }
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.LexerError;
+    }
 
-    var ast = parser.parse(gpa, &l);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
-        debug.reportErrors(ast.errors, "test_runner", source);
-        return error.ParserFailed;
+        dbg("ast.errors", ast.errors);
+        return error.ParserError;
     }
 
     var nir = sema.analyze(gpa, &ast);
@@ -361,12 +372,21 @@ fn testRunNoFree(
     stderr: *Io.Writer,
 ) !NoFreeResult {
     var l = Lexer.init(source);
+    const tokens = l.scanTokens(gpa);
+    defer {
+        gpa.free(tokens.tokens);
+        gpa.free(tokens.errors);
+    }
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.LexerError;
+    }
 
-    var ast = parser.parse(gpa, &l);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
-        debug.reportErrors(ast.errors, "test_runner", source);
-        return error.ParserFailed;
+        dbg("ast.errors", ast.errors);
+        return error.ParserError;
     }
 
     var nir = sema.analyze(gpa, &ast);

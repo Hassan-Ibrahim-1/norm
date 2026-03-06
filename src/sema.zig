@@ -127,6 +127,7 @@ const Sema = struct {
             .cast => |*c| s.cast(c),
             .grouping => |*g| s.grouping(g),
             .literal => |*l| s.literal(l),
+            .identifier => @panic("todo"),
         };
     }
 
@@ -364,12 +365,21 @@ const dbg = @import("debug.zig").dbg;
 
 fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
     var l = Lexer.init(source);
+    const tokens = l.scanTokens(gpa);
+    defer {
+        gpa.free(tokens.tokens);
+        gpa.free(tokens.errors);
+    }
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.LexerError;
+    }
 
-    var ast = parser.parse(gpa, &l);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
-        debug.reportErrors(ast.errors, "test_runner", source);
-        return error.ParserFailed;
+        dbg("ast.errors", ast.errors);
+        return error.ParserError;
     }
 
     var nir = analyze(gpa, &ast);
@@ -386,12 +396,21 @@ fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
 
 fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
     var l = Lexer.init(source);
+    const tokens = l.scanTokens(gpa);
+    defer {
+        gpa.free(tokens.tokens);
+        gpa.free(tokens.errors);
+    }
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.LexerError;
+    }
 
-    var ast = parser.parse(gpa, &l);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
-        debug.reportErrors(ast.errors, "test_runner", source);
-        return error.ParserFailed;
+        dbg("ast.errors", ast.errors);
+        return error.ParserError;
     }
 
     const nir = analyze(gpa, &ast);

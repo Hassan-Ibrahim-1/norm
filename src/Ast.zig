@@ -32,6 +32,10 @@ pub const Diagnostics = struct {
 pub const Stmt = union(enum) {
     pub const Expression = struct {
         expr: *Expr,
+
+        pub fn format(e: *const Stmt.Expression, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{f};", .{e.expr});
+        }
     };
 
     pub const VarDecl = struct {
@@ -39,16 +43,36 @@ pub const Stmt = union(enum) {
         // At least one of the below in non-null
         type_expr: ?*Expr,
         value: ?*Expr,
+
+        pub fn format(vd: *const Stmt.VarDecl, w: *Io.Writer) Io.Writer.Error!void {
+            if (vd.type_expr != null and vd.value != null) {
+                try w.print("{s}: {f} = {f};", .{ vd.ident.lexeme, vd.type_expr.?, vd.value.? });
+            } else if (vd.type_expr != null) {
+                try w.print("{s}: {f};", .{ vd.ident.lexeme, vd.type_expr.? });
+            } else {
+                try w.print("{s} := {f};", .{ vd.ident.lexeme, vd.value.? });
+            }
+        }
     };
 
     pub const VarAssign = struct {
         ident: Token,
-        expr: *Expr,
+        value: *Expr,
+
+        pub fn format(va: *const Stmt.VarAssign, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{s} = {f};", .{ va.ident.lexeme, va.value });
+        }
     };
 
     expression: Expression,
     var_decl: VarDecl,
     var_assign: VarAssign,
+
+    pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {
+        switch (stmt) {
+            inline else => |s| try w.print("{f}", .{s}),
+        }
+    }
 };
 
 pub const Expr = union(enum) {
@@ -121,11 +145,20 @@ pub const Expr = union(enum) {
         }
     };
 
+    pub const Identifier = struct {
+        ident: Token,
+
+        pub fn format(ident: *const Identifier, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{s}", .{ident.ident.lexeme});
+        }
+    };
+
     binary: Binary,
     unary: Unary,
     cast: Cast,
     grouping: Grouping,
     literal: Literal,
+    identifier: Identifier,
 
     pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
         try switch (expr.*) {

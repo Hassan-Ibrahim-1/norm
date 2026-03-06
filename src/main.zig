@@ -65,8 +65,19 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
         const line = line_buf[0..len];
 
         var lexer = Lexer.init(line);
+        const tokens = lexer.scanTokens(gpa);
+        defer {
+            gpa.free(tokens.tokens);
+            gpa.free(tokens.errors);
+        }
+        if (tokens.errors.len > 0) {
+            for (tokens.errors) |diag| {
+                try stderr.print("{s}\n", .{diag.error_msg});
+            }
+            continue;
+        }
 
-        var ast = parser.parse(gpa, &lexer);
+        var ast = parser.parse(gpa, tokens.tokens);
         defer ast.arena.deinit();
         if (ast.errors.len > 0) {
             for (ast.errors) |diag| {
