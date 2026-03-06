@@ -35,6 +35,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] consider adding making specific instructions for each type. right now op_add et al have to deal
 - [ ] variable declartions + statements + scopes
 - [ ] variable mutability + assignment
+- [ ] sync points at statement boundaries for parser and sema
 - [ ] if statements
 - [ ] rewrite logical operators to have short circuit behavior
 - [ ] loops

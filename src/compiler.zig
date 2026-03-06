@@ -185,6 +185,7 @@ pub const Compiler = struct {
             .cast => |*ca| c.cast(ca, expr.type),
             .grouping => |*g| c.grouping(g),
             .literal => |*l| c.literal(l),
+            .identifier => @panic("todo"),
         }
     }
 

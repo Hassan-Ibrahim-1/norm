@@ -26,7 +26,6 @@ pub const Scope = struct {
 };
 
 pub const Symbol = struct {
-    name: Token,
     type: NormType,
     scope: *Scope,
 };
@@ -91,6 +90,52 @@ pub const NormType = enum {
 
     pub fn int(ty: NormType) trait.SmallestEnumBackingType(NormType) {
         return @intFromEnum(ty);
+    }
+};
+
+pub const Stmt = struct {
+    pub const Expression = struct {
+        expr: *Expr,
+
+        pub fn format(e: *const Stmt.Expression, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{f};", .{e.expr});
+        }
+    };
+
+    pub const VarDecl = struct {
+        ident: Token,
+        // At least one of the below in non-null
+        type_expr: ?*Expr,
+        value: ?*Expr,
+
+        pub fn format(vd: *const Stmt.VarDecl, w: *Io.Writer) Io.Writer.Error!void {
+            if (vd.type_expr != null and vd.value != null) {
+                try w.print("{s}: {f} = {f};", .{ vd.ident.lexeme, vd.type_expr.?, vd.value.? });
+            } else if (vd.type_expr != null) {
+                try w.print("{s}: {f};", .{ vd.ident.lexeme, vd.type_expr.? });
+            } else {
+                try w.print("{s} := {f};", .{ vd.ident.lexeme, vd.value.? });
+            }
+        }
+    };
+
+    pub const VarAssign = struct {
+        ident: Token,
+        value: *Expr,
+
+        pub fn format(va: *const Stmt.VarAssign, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{s} = {f};", .{ va.ident.lexeme, va.value });
+        }
+    };
+
+    expression: Expression,
+    var_decl: VarDecl,
+    var_assign: VarAssign,
+
+    pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {
+        switch (stmt) {
+            inline else => |s| try w.print("{f}", .{s}),
+        }
     }
 };
 
@@ -177,12 +222,21 @@ pub const Expr = struct {
         }
     };
 
+    pub const Identifier = struct {
+        name: Token,
+
+        pub fn format(i: *const Identifier, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{s}", .{i.name.lexeme});
+        }
+    };
+
     type: NormType,
     kind: union(enum) {
         binary: Binary,
         unary: Unary,
         cast: Cast,
         grouping: Grouping,
+        identifier: Identifier,
         literal: Literal,
     },
 
@@ -197,6 +251,7 @@ pub const Expr = struct {
             .unary => |*u| u.operator,
             .cast => |*c| c.token,
             .literal => |*l| l.token,
+            .identifier => |*i| i.name,
             .grouping => |*g| g.paren,
         };
     }
