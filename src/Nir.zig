@@ -86,8 +86,8 @@ pub const SymbolTable = struct {
         return scope;
     }
 
-    pub fn find(st: *SymbolTable, name: []const u8) ?Symbol {
-        return st.top.get(name);
+    pub fn find(st: *SymbolTable, name: []const u8) ?*Symbol {
+        return st.top.getPtr(name);
     }
 };
 

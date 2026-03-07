@@ -147,7 +147,11 @@ const Sema = struct {
         for (stmts) |stmt| {
             switch (stmt) {
                 .var_decl => |vd| {
-                    const var_type = s.analyzeTypeExpr(vd.type_expr orelse @panic("todo"));
+                    const var_type =
+                        if (vd.type_expr) |type_expr|
+                            s.analyzeTypeExpr(type_expr)
+                        else
+                            .n_invalid;
                     s.sym_table.registerGlobal(vd.ident.lexeme, var_type);
                 },
                 else => {},
@@ -175,7 +179,6 @@ const Sema = struct {
                 return .{ .expression = .{ .expr = nir_expr } };
             },
             .var_decl => |vd| {
-                // FIXME: shouldn't assume top scope
                 const sym = s.sym_table.find(vd.ident.lexeme).?;
                 const value =
                     if (vd.value) |v|
@@ -183,6 +186,8 @@ const Sema = struct {
                     else
                         @panic("todo: zero values");
                 if (value == null) return .invalid;
+                if (sym.type == .n_invalid) sym.type = value.?.type;
+
                 return .{ .var_decl = .{ .ident = vd.ident, .value = value.?, .type = sym.type } };
             },
             .var_assign => @panic("todo"),
@@ -219,7 +224,7 @@ const Sema = struct {
     }
 
     fn expectTypeAutoCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
-        if (expr.type == target) return expr;
+        if (expr.type == target or target == .n_invalid) return expr;
         const casted = s.tryCast(expr, target) orelse {
             s.reportError(expr, "Expected {f} got {f}", .{ target, expr.type });
             return null;
@@ -961,35 +966,55 @@ test "undefined variable" {
     }
 }
 
-// test "variable declaration - type inference" {
-//     const gpa = testing.allocator;
-//     const tests: []const struct {
-//         source: []const u8,
-//         expected: []const u8,
-//     } = &.{
-//         .{
-//             .source = "x := 10;",
-//             .expected = "x: int = 10;",
-//         },
-//         .{
-//             .source = "x := 10.0;",
-//             .expected = "x: float = 10.000;",
-//         },
-//         .{
-//             .source = "x := true;",
-//             .expected = "x: bool = true;",
-//         },
-//         .{
-//             .source = "x := \"hey\";",
-//             .expected = "x: string = \"hey\";",
-//         },
-//     };
-//
-//     for (tests) |t| {
-//         errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
-//
-//         const actual = try testAnalyze(gpa, t.source);
-//         defer gpa.free(actual);
-//         try testing.expectEqualStrings(t.expected, actual);
-//     }
-// }
+test "variable declaration - type inference" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "x := 10;",
+            .expected = "x: int = 10;",
+        },
+        .{
+            .source = "x := 10.0;",
+            .expected = "x: float = 10.000;",
+        },
+        .{
+            .source = "x := true;",
+            .expected = "x: bool = true;",
+        },
+        .{
+            .source = "x := \"hey\";",
+            .expected = "x: string = \"hey\";",
+        },
+        .{
+            .source = "x := 10 + 2;",
+            .expected = "x: int = (10 + 2):int;",
+        },
+        .{
+            .source = "x := float(10);",
+            .expected = "x: float = float(10);",
+        },
+        .{
+            .source = "x := int(10 + 2.0);",
+            .expected = "x: int = int((float(10) + 2.000):float);",
+        },
+        .{
+            .source = "x := 2 > 1;",
+            .expected = "x: bool = (2 > 1):bool;",
+        },
+        .{
+            .source = "x := \"Hello, \" + \"World\";",
+            .expected = "x: string = (\"Hello, \" + \"World\"):string;",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
