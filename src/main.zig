@@ -77,7 +77,7 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
             continue;
         }
 
-        var ast = parser.parse(gpa, tokens.tokens);
+        var ast = parser.parse(gpa, tokens.tokens, true);
         defer ast.arena.deinit();
         if (ast.errors.len > 0) {
             for (ast.errors) |diag| {
@@ -94,16 +94,18 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
             }
             continue;
         }
-        try stderr.print("[sema]: {any}\n", .{nir.stmts});
+        const stmts = debug.printStmts(gpa, nir.stmts);
+        defer gpa.free(stmts);
+        try stderr.print("{s}\n", .{stmts});
 
-        var chunk = compiler.compile(gpa, &nir);
-        defer chunk.deinit();
-
-        var vm = Vm.init(gpa, stdout, stderr);
-        defer vm.deinit();
-
-        const value = try vm.interpret(&chunk);
-        try stdout.print("{f}\n", .{value});
+        // var chunk = compiler.compile(gpa, &nir);
+        // defer chunk.deinit();
+        //
+        // var vm = Vm.init(gpa, stdout, stderr);
+        // defer vm.deinit();
+        //
+        // const value = try vm.interpret(&chunk);
+        // try stdout.print("{f}\n", .{value});
     }
 }
 

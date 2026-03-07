@@ -165,7 +165,7 @@ pub fn reportErrors(errors: anytype, file_name: []const u8, source: []const u8) 
 
 const Allocator = mem.Allocator;
 
-pub fn printAstStmts(gpa: Allocator, stmts: []Ast.Stmt) []u8 {
+pub fn printStmts(gpa: Allocator, stmts: anytype) []u8 {
     var aw: Io.Writer.Allocating = .init(gpa);
 
     for (stmts, 0..) |stmt, i| {

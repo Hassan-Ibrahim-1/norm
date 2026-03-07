@@ -326,7 +326,7 @@ fn testRun(
     stdout: *Io.Writer,
     stderr: *Io.Writer,
 ) !Value {
-    var l = Lexer.init(source);
+    var l = Lexer.init(source, true);
     const tokens = l.scanTokens(gpa);
     defer {
         gpa.free(tokens.tokens);
@@ -382,7 +382,7 @@ fn testRunNoFree(
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens);
+    var ast = parser.parse(gpa, tokens.tokens, true);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);

@@ -121,7 +121,7 @@ pub const Expr = union(enum) {
                 try switch (value.*) {
                     .integer => |i| w.print("{}", .{i}),
                     .float => |i| w.print("{d:.3}", .{i}),
-                    .string => |i| w.print("{s}", .{i}),
+                    .string => |i| w.print("\"{s}\"", .{i}),
                     .boolean => |i| w.print("{}", .{i}),
                     .nil => w.print("nil", .{}),
                 };

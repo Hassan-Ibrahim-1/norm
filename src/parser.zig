@@ -27,6 +27,8 @@ const Parser = struct {
     panic_mode: bool,
     errors: std.ArrayList(Ast.Diagnostics),
 
+    repl: bool,
+
     const Precedence = enum {
         lowest,
         _or, // or
@@ -114,7 +116,7 @@ const Parser = struct {
         return &parse_rules[@intFromEnum(tt)];
     }
 
-    fn init(arena: Allocator, scratch: Allocator, tokens: []Token) Parser {
+    fn init(arena: Allocator, scratch: Allocator, tokens: []Token, repl: bool) Parser {
         var parser: Parser = .{
             .arena = arena,
             .scratch = scratch,
@@ -125,6 +127,7 @@ const Parser = struct {
             .next = tokens[0],
             .panic_mode = false,
             .errors = .empty,
+            .repl = repl,
         };
         parser.advance();
         return parser;
@@ -183,7 +186,7 @@ const Parser = struct {
     }
 
     fn consumeSemicolon(p: *Parser) void {
-        if (builtin.is_test) {
+        if (p.repl) {
             _ = p.match(.semicolon);
             return;
         }
@@ -339,10 +342,10 @@ const Parser = struct {
 };
 
 /// `arena.deinit` must be called even if expr is null
-pub fn parse(gpa: Allocator, tokens: []Token) Ast {
+pub fn parse(gpa: Allocator, tokens: []Token, repl: bool) Ast {
     var arena: std.heap.ArenaAllocator = .init(gpa);
 
-    var p = Parser.init(arena.allocator(), gpa, tokens);
+    var p = Parser.init(arena.allocator(), gpa, tokens, repl);
 
     var stmts: std.ArrayList(Ast.Stmt) = .empty;
 
@@ -424,7 +427,7 @@ fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
         return error.LexerError;
     }
 
-    var ast = parse(gpa, tokens.tokens);
+    var ast = parse(gpa, tokens.tokens, true);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
@@ -455,14 +458,14 @@ fn testParseStmts(gpa: Allocator, source: []const u8) ![]const u8 {
         return error.LexerError;
     }
 
-    var ast = parse(gpa, tokens.tokens);
+    var ast = parse(gpa, tokens.tokens, true);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
         return error.ParserError;
     }
 
-    return debug.printAstStmts(gpa, ast.stmts);
+    return debug.printStmts(gpa, ast.stmts);
 }
 
 test "arithmetic expressions" {
@@ -580,6 +583,28 @@ test "arithmetic expressions" {
     }
 }
 
+test "string concat" {
+    const gpa = std.testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "\"Hello, \" + \"World\"",
+            .expected = "(\"Hello, \" + \"World\")",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer dbg("test case", t);
+
+        const parsed = try testParse(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
+
 test "literals" {
     const gpa = std.testing.allocator;
 
@@ -592,7 +617,7 @@ test "literals" {
         .{ .source = "true", .expected = "true" },
         .{ .source = "false", .expected = "false" },
         .{ .source = "nil", .expected = "nil" },
-        .{ .source = "\"hey\"", .expected = "hey" },
+        .{ .source = "\"hey\"", .expected = "\"hey\"" },
     };
 
     for (tests) |t| {
@@ -740,6 +765,40 @@ test "variable declaration" {
         .{
             .source = "x: Number;",
             .expected = "x: Number;",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer dbg("test case", t);
+
+        const parsed = try testParseStmts(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
+
+test "full variable declarations" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "x: int = 10 + 2;",
+            .expected = "x: int = (10 + 2);",
+        },
+        .{
+            .source = "x: int = 10 + 2.0 * 3;",
+            .expected = "x: int = (10 + (2.000 * 3));",
+        },
+        .{
+            .source = "x: bool = 2 > 1 and 1 < 2;",
+            .expected = "x: bool = ((2 > 1) and (1 < 2));",
+        },
+        .{
+            .source = "x: string = \"Hello, \" + \"World\";",
+            .expected = "x: string = (\"Hello, \" + \"World\");",
         },
     };
 

@@ -82,7 +82,7 @@ const Sema = struct {
     errors: std.ArrayList(Nir.Diagnostics),
     // TODO: reset on statement boundary
     panic_mode: bool,
-    invalid: *Nir.Expr,
+    invalid_expr: *Nir.Expr,
     sym_table: Nir.SymbolTable,
 
     const TypeMask = u64;
@@ -112,7 +112,7 @@ const Sema = struct {
 
     fn init(gpa: Allocator, arena: Allocator) Sema {
         return .{
-            .invalid = makeInvalid(arena),
+            .invalid_expr = makeInvalid(arena),
             .sym_table = .init(gpa),
             .arena = arena,
             .errors = .empty,
@@ -171,8 +171,13 @@ const Sema = struct {
             .var_decl => |vd| {
                 // FIXME: shouldn't assume top scope
                 const sym = s.sym_table.top.get(vd.ident.lexeme).?;
-                const value = if (vd.value) |v| s.expression(v) else @panic("todo: zero values");
-                return .{ .var_decl = .{ .ident = vd.ident, .value = value, .type = sym.type } };
+                const value =
+                    if (vd.value) |v|
+                        s.expectTypeAutoCast(s.expression(v), sym.type)
+                    else
+                        @panic("todo: zero values");
+                if (value == null) return .invalid;
+                return .{ .var_decl = .{ .ident = vd.ident, .value = value.?, .type = sym.type } };
             },
             .var_assign => @panic("todo"),
         }
@@ -207,6 +212,15 @@ const Sema = struct {
         return null;
     }
 
+    fn expectTypeAutoCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
+        if (expr.type == target) return expr;
+        const casted = s.tryCast(expr, target) orelse {
+            s.reportError(expr, "Expected {f} got {f}", .{ target, expr.type });
+            return null;
+        };
+        return casted;
+    }
+
     fn binary(s: *Sema, b: *Ast.Expr.Binary) *Nir.Expr {
         const left = s.expression(b.left);
         const right = s.expression(b.right);
@@ -237,8 +251,8 @@ const Sema = struct {
 
             .slash => {
                 if (left.type.isNumeric() and right.type.isNumeric()) {
-                    const cast_left = s.tryCast(left, .n_float) orelse return s.invalid;
-                    const cast_right = s.tryCast(right, .n_float) orelse return s.invalid;
+                    const cast_left = s.tryCast(left, .n_float) orelse return s.invalid_expr;
+                    const cast_right = s.tryCast(right, .n_float) orelse return s.invalid_expr;
                     return makeBinary(arena, cast_left, b.operator, cast_right, .n_float);
                 }
                 return s.invalidBinaryOp(left, b.operator, right);
@@ -312,15 +326,15 @@ const Sema = struct {
         const arena = s.arena;
 
         const expr = s.expression(c.expr);
-        if (expr.type == .n_invalid) return s.invalid;
+        if (expr.type == .n_invalid) return s.invalid_expr;
 
         const target_type: NormType = switch (c.token.type) {
             .kw_float => if (!s.expectType(expr, .n_int, "Cannot cast {f} to float, expected int", .{expr.type}))
-                return s.invalid
+                return s.invalid_expr
             else
                 .n_float,
             .kw_int => if (!s.expectType(expr, .n_float, "Cannot cast {f} to int, expected float", .{expr.type}))
-                return s.invalid
+                return s.invalid_expr
             else
                 .n_int,
             else => unreachable,
@@ -331,7 +345,7 @@ const Sema = struct {
 
     fn grouping(s: *Sema, g: *Ast.Expr.Grouping) *Nir.Expr {
         const expr = s.expression(g.expr);
-        if (expr.type == .n_invalid) return s.invalid;
+        if (expr.type == .n_invalid) return s.invalid_expr;
         return makeGrouping(s.arena, expr, g.paren, expr.type);
     }
 
@@ -410,7 +424,7 @@ const Sema = struct {
 
     fn reportErrorInv(s: *Sema, expr: *Nir.Expr, comptime error_msg: []const u8, args: anytype) *Nir.Expr {
         s.reportError(expr, error_msg, args);
-        return s.invalid;
+        return s.invalid_expr;
     }
 };
 
@@ -439,7 +453,7 @@ const Lexer = @import("Lexer.zig");
 const parser = @import("parser.zig");
 const dbg = @import("debug.zig").dbg;
 
-fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
+fn testAnalyzeExpr(gpa: Allocator, source: []const u8) ![]const u8 {
     var l = Lexer.init(source);
     const tokens = l.scanTokens(gpa);
     defer {
@@ -451,7 +465,7 @@ fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens);
+    var ast = parser.parse(gpa, tokens.tokens, true);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
@@ -470,7 +484,7 @@ fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
     return aw.toOwnedSlice();
 }
 
-fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
+fn testAnalyzeExprFailure(gpa: Allocator, source: []const u8) !Nir {
     var l = Lexer.init(source);
     const tokens = l.scanTokens(gpa);
     defer {
@@ -482,7 +496,7 @@ fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens);
+    var ast = parser.parse(gpa, tokens.tokens, true);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
@@ -498,6 +512,34 @@ fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
     return nir;
 }
 
+fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
+    var l = Lexer.init(source);
+    const tokens = l.scanTokens(gpa);
+    defer {
+        gpa.free(tokens.tokens);
+        gpa.free(tokens.errors);
+    }
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.LexerError;
+    }
+
+    var ast = parser.parse(gpa, tokens.tokens, true);
+    defer ast.arena.deinit();
+    if (ast.errors.len > 0) {
+        dbg("ast.errors", ast.errors);
+        return error.ParserError;
+    }
+
+    var nir = analyze(gpa, &ast);
+    defer nir.deinit();
+    if (nir.errors.len > 0) {
+        debug.reportErrors(nir.errors, "test_runner", source);
+        return error.SemaFailed;
+    }
+
+    return debug.printStmts(gpa, nir.stmts);
+}
 const testing = std.testing;
 
 test "arithmetic" {
@@ -515,7 +557,7 @@ test "arithmetic" {
     };
 
     for (tests) |t| {
-        const actual = try testAnalyze(gpa, t.source);
+        const actual = try testAnalyzeExpr(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
     }
@@ -536,7 +578,7 @@ test "arithmetic failure" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
 
-        var nir = try testAnalyzeFailure(gpa, t.source);
+        var nir = try testAnalyzeExprFailure(gpa, t.source);
         defer nir.deinit();
 
         try testing.expect(nir.errors.len == 1);
@@ -550,11 +592,14 @@ test "string concat" {
         source: []const u8,
         expected: []const u8,
     } = &.{
-        .{ .source = "\"Hello, \" + \"World\"", .expected = "(\"Hello, \" + \"World\"):string" },
+        .{
+            .source = "\"Hello, \" + \"World\"",
+            .expected = "(\"Hello, \" + \"World\"):string",
+        },
     };
 
     for (tests) |t| {
-        const actual = try testAnalyze(gpa, t.source);
+        const actual = try testAnalyzeExpr(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
     }
@@ -574,7 +619,7 @@ test "string concat failure" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
 
-        var nir = try testAnalyzeFailure(gpa, t.source);
+        var nir = try testAnalyzeExprFailure(gpa, t.source);
         defer nir.deinit();
 
         try testing.expect(nir.errors.len == 1);
@@ -601,7 +646,7 @@ test "comparison" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
 
-        const actual = try testAnalyze(gpa, t.source);
+        const actual = try testAnalyzeExpr(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
     }
@@ -626,7 +671,7 @@ test "comparison failure" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
 
-        var nir = try testAnalyzeFailure(gpa, t.source);
+        var nir = try testAnalyzeExprFailure(gpa, t.source);
         defer nir.deinit();
 
         try testing.expect(nir.errors.len == 1);
@@ -648,7 +693,7 @@ test "logical" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
 
-        const actual = try testAnalyze(gpa, t.source);
+        const actual = try testAnalyzeExpr(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
     }
@@ -670,7 +715,7 @@ test "logical failure" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
 
-        var nir = try testAnalyzeFailure(gpa, t.source);
+        var nir = try testAnalyzeExprFailure(gpa, t.source);
         defer nir.deinit();
 
         try testing.expect(nir.errors.len == 1);
@@ -691,7 +736,7 @@ test "casting" {
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
 
-        const actual = try testAnalyze(gpa, t.source);
+        const actual = try testAnalyzeExpr(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
     }
@@ -721,6 +766,76 @@ test "auto casting" {
         .{ .source = "3.0 < 4", .expected = "(3.000 < float(4)):bool" },
         .{ .source = "2 <= 3.0", .expected = "(float(2) <= 3.000):bool" },
         .{ .source = "3.0 <= 4", .expected = "(3.000 <= float(4)):bool" },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyzeExpr(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "full variable declarations - simple values" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "x: int = 10;",
+            .expected = "x: int = 10;",
+        },
+        .{
+            .source = "x: float = 10.0;",
+            .expected = "x: float = 10.000;",
+        },
+        .{
+            .source = "x: bool = true;",
+            .expected = "x: bool = true;",
+        },
+        .{
+            .source = "x: string = \"hey\";",
+            .expected = "x: string = \"hey\";",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "full variable declarations - complex values" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "x: int = 10 + 2;",
+            .expected = "x: int = (10 + 2):int;",
+        },
+        .{
+            .source = "x: float = 10;",
+            .expected = "x: float = float(10);",
+        },
+        .{
+            .source = "x: int = 10 + 2.0;",
+            .expected = "x: int = int((float(10) + 2.000):float);",
+        },
+        .{
+            .source = "x: bool = 2 > 1;",
+            .expected = "x: bool = (2 > 1):bool;",
+        },
+        .{
+            .source = "x: string = \"Hello, \" + \"World\";",
+            .expected = "x: string = (\"Hello, \" + \"World\"):string;",
+        },
     };
 
     for (tests) |t| {

@@ -63,6 +63,8 @@ pub const SymbolTable = struct {
 
     pub fn deinit(st: *SymbolTable) void {
         st.scope_arena.deinit();
+        st.top.deinit(st.gpa);
+        st.locals.deinit(st.gpa);
         st.* = undefined;
     }
 
@@ -149,16 +151,10 @@ pub const Stmt = union(enum) {
         ident: Token,
         type: NormType,
         // sema could possibly automatically set this to the zero value
-        value: ?*Expr,
+        value: *Expr,
 
         pub fn format(vd: *const Stmt.VarDecl, w: *Io.Writer) Io.Writer.Error!void {
-            if (vd.type_expr != null and vd.value != null) {
-                try w.print("{s}: {f} = {f};", .{ vd.ident.lexeme, vd.type_expr.?, vd.value.? });
-            } else if (vd.type_expr != null) {
-                try w.print("{s}: {f};", .{ vd.ident.lexeme, vd.type_expr.? });
-            } else {
-                try w.print("{s} := {f};", .{ vd.ident.lexeme, vd.value.? });
-            }
+            try w.print("{s}: {f} = {f};", .{ vd.ident.lexeme, vd.type, vd.value });
         }
     };
 
@@ -170,6 +166,8 @@ pub const Stmt = union(enum) {
             try w.print("{s} = {f};", .{ va.ident.lexeme, va.value });
         }
     };
+
+    pub const invalid: Stmt = undefined;
 
     expression: Expression,
     var_decl: VarDecl,
