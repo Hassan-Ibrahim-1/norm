@@ -11,6 +11,12 @@ const Token = @import("Lexer.zig").Token;
 const Nir = @import("Nir.zig");
 const NormType = Nir.NormType;
 
+fn makeIdentifier(arena: Allocator, ident: Token, scope: *Nir.Scope, ty: NormType) *Nir.Expr {
+    const e = makeExpr(arena);
+    e.* = .{ .kind = .{ .identifier = .{ .ident = ident, .scope = scope } }, .type = ty };
+    return e;
+}
+
 fn makeGrouping(arena: Allocator, grping: *Nir.Expr, paren: Token, ty: NormType) *Nir.Expr {
     const e = makeExpr(arena);
     e.* = .{ .kind = .{ .grouping = .{ .paren = paren, .expr = grping } }, .type = ty };
@@ -170,7 +176,7 @@ const Sema = struct {
             },
             .var_decl => |vd| {
                 // FIXME: shouldn't assume top scope
-                const sym = s.sym_table.top.get(vd.ident.lexeme).?;
+                const sym = s.sym_table.find(vd.ident.lexeme).?;
                 const value =
                     if (vd.value) |v|
                         s.expectTypeAutoCast(s.expression(v), sym.type)
@@ -198,8 +204,8 @@ const Sema = struct {
             .unary => |*u| s.unary(u),
             .cast => |*c| s.cast(c),
             .grouping => |*g| s.grouping(g),
+            .identifier => |*i| s.identifier(i),
             .literal => |*l| s.literal(l),
-            .identifier => @panic("todo"),
         };
     }
 
@@ -349,6 +355,16 @@ const Sema = struct {
         return makeGrouping(s.arena, expr, g.paren, expr.type);
     }
 
+    fn identifier(s: *Sema, i: *Ast.Expr.Identifier) *Nir.Expr {
+        const sym = s.sym_table.find(i.ident.lexeme) orelse return s.undefinedVariable(i.ident);
+        return makeIdentifier(s.arena, i.ident, sym.scope, sym.type);
+    }
+
+    fn undefinedVariable(s: *Sema, name: Token) *Nir.Expr {
+        s.reportErrorLine(name.line, "Undefined variable {s}", .{name.lexeme});
+        return s.invalid_expr;
+    }
+
     fn literal(s: *Sema, l: *Ast.Expr.Literal) *Nir.Expr {
         const ty: NormType = switch (l.value) {
             .float => .n_float,
@@ -419,6 +435,12 @@ const Sema = struct {
     fn reportErrorAst(s: *Sema, expr: *Ast.Expr, comptime error_msg: []const u8, args: anytype) void {
         if (s.panic_mode) return;
         s.errors.append(s.arena, s.diag(expr.token().line, error_msg, args)) catch oom();
+        s.panic_mode = true;
+    }
+
+    fn reportErrorLine(s: *Sema, line: u32, comptime error_msg: []const u8, args: anytype) void {
+        if (s.panic_mode) return;
+        s.errors.append(s.arena, s.diag(line, error_msg, args)) catch oom();
         s.panic_mode = true;
     }
 
@@ -506,7 +528,7 @@ fn testAnalyzeExprFailure(gpa: Allocator, source: []const u8) !Nir {
     var nir = analyze(gpa, &ast);
     errdefer nir.deinit();
     if (nir.errors.len == 0) {
-        std.debug.print("sema passed with output=\"{f}\"\n", .{nir.stmts[0].expression.expr});
+        std.debug.print("expected an error, sema passed with output=\"{f}\"\n", .{nir.stmts[0].expression.expr});
         return error.SemaPassed;
     }
     return nir;
@@ -540,6 +562,38 @@ fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
 
     return debug.printStmts(gpa, nir.stmts);
 }
+
+fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
+    var l = Lexer.init(source);
+    const tokens = l.scanTokens(gpa);
+    defer {
+        gpa.free(tokens.tokens);
+        gpa.free(tokens.errors);
+    }
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.LexerError;
+    }
+
+    var ast = parser.parse(gpa, tokens.tokens, true);
+    defer ast.arena.deinit();
+    if (ast.errors.len > 0) {
+        dbg("ast.errors", ast.errors);
+        return error.ParserError;
+    }
+
+    var nir = analyze(gpa, &ast);
+    errdefer nir.deinit();
+    if (nir.errors.len == 0) {
+        const stmts = debug.printStmts(gpa, nir.stmts);
+        defer gpa.free(stmts);
+        std.debug.print("expected an error, sema passed with output=\"{s}\"\n", .{stmts});
+        return error.SemaPassed;
+    }
+
+    return nir;
+}
+
 const testing = std.testing;
 
 test "arithmetic" {
@@ -846,3 +900,96 @@ test "full variable declarations - complex values" {
         try testing.expectEqualStrings(t.expected, actual);
     }
 }
+
+test "tracking variables" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "x: int = 10; x;",
+            .expected = "x: int = 10;\nx:int;",
+        },
+        .{
+            .source = "x: int = 10; x + 10;",
+            .expected = "x: int = 10;\n(x:int + 10):int;",
+        },
+        .{
+            .source = "x: int = 10; y: int = x; y + 1;",
+            .expected = "x: int = 10;\ny: int = x:int;\n(y:int + 1):int;",
+        },
+        .{
+            .source = "x: int = 10; y: int = x; z: int = y * x;",
+            .expected = "x: int = 10;\ny: int = x:int;\nz: int = (y:int * x:int):int;",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "undefined variable" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{
+            .source = "x;",
+            .error_msg = "Undefined variable x",
+        },
+        .{
+            .source = "x: int = 10; x; y",
+            .error_msg = "Undefined variable y",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
+    }
+}
+
+// test "variable declaration - type inference" {
+//     const gpa = testing.allocator;
+//     const tests: []const struct {
+//         source: []const u8,
+//         expected: []const u8,
+//     } = &.{
+//         .{
+//             .source = "x := 10;",
+//             .expected = "x: int = 10;",
+//         },
+//         .{
+//             .source = "x := 10.0;",
+//             .expected = "x: float = 10.000;",
+//         },
+//         .{
+//             .source = "x := true;",
+//             .expected = "x: bool = true;",
+//         },
+//         .{
+//             .source = "x := \"hey\";",
+//             .expected = "x: string = \"hey\";",
+//         },
+//     };
+//
+//     for (tests) |t| {
+//         errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+//
+//         const actual = try testAnalyze(gpa, t.source);
+//         defer gpa.free(actual);
+//         try testing.expectEqualStrings(t.expected, actual);
+//     }
+// }

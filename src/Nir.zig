@@ -85,6 +85,10 @@ pub const SymbolTable = struct {
         };
         return scope;
     }
+
+    pub fn find(st: *SymbolTable, name: []const u8) ?Symbol {
+        return st.top.get(name);
+    }
 };
 
 pub const NormType = enum {
@@ -264,10 +268,11 @@ pub const Expr = struct {
     };
 
     pub const Identifier = struct {
-        name: Token,
+        ident: Token,
+        scope: *Scope,
 
         pub fn format(i: *const Identifier, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{s}", .{i.name.lexeme});
+            try w.print("{s}", .{i.ident.lexeme});
         }
     };
 
@@ -292,7 +297,7 @@ pub const Expr = struct {
             .unary => |*u| u.operator,
             .cast => |*c| c.token,
             .literal => |*l| l.token,
-            .identifier => |*i| i.name,
+            .identifier => |*i| i.ident,
             .grouping => |*g| g.paren,
         };
     }
