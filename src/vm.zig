@@ -255,6 +255,17 @@ pub const Vm = struct {
                     vm.push(.{ .float = @floatFromInt(a.integer) });
                 },
 
+                .op_store => {
+                    const value = vm.pop();
+                    const stack_slot = vm.readShort();
+                    vm.stack[stack_slot] = value;
+                },
+
+                .op_load => {
+                    const stack_slot = vm.readShort();
+                    vm.push(vm.stack[stack_slot]);
+                },
+
                 .op_pop => {
                     _ = vm.pop();
                 },
@@ -269,6 +280,11 @@ pub const Vm = struct {
     fn readByte(vm: *Vm) u8 {
         defer vm.ip += 1;
         return vm.ip[0];
+    }
+
+    fn readShort(vm: *Vm) u16 {
+        const short_bytes = vm.readNBytes(2);
+        return mem.readInt(u16, &short_bytes, .little);
     }
 
     fn readNBytes(vm: *Vm, comptime n: usize) [n]u8 {
@@ -330,7 +346,7 @@ fn testRun(
     stdout: *Io.Writer,
     stderr: *Io.Writer,
 ) !Value {
-    var l = Lexer.init(source, true);
+    var l = Lexer.init(source);
     const tokens = l.scanTokens(gpa);
     defer {
         gpa.free(tokens.tokens);
@@ -341,7 +357,7 @@ fn testRun(
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens);
+    var ast = parser.parse(gpa, tokens.tokens, true);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
@@ -553,6 +569,7 @@ test "string concatenation" {
     } = &.{
         .{ .source = "\"Hello, \" + \"World\"", .expected = .{ .string = .ref("Hello, World") } },
         .{ .source = "\"Hello, \" + \"World\" + \"!\"", .expected = .{ .string = .ref("Hello, World!") } },
+        .{ .source = "\"Hello\" + \", \" + \"World\" + \"!\"", .expected = .{ .string = .ref("Hello, World!") } },
     };
 
     for (tests) |t| {
@@ -583,5 +600,75 @@ test "string comparisons" {
         errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
         const value = try testRun(gpa, t.source, w, w);
         try testing.expectEqual(t.expected, value);
+    }
+}
+
+test "variable - simple store and load" {
+    const gpa = testing.allocator;
+    var discarding: Io.Writer.Discarding = .init(&.{});
+    const w = &discarding.writer;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{
+        .{
+            .source = "x := 10; x",
+            .expected = .{ .integer = 10 },
+        },
+        .{
+            .source = "x := 10; y := x; y + 10",
+            .expected = .{ .integer = 20 },
+        },
+        .{
+            .source = "x := 10; y := x * 3 + 1; y + 10 == 41",
+            .expected = .{ .boolean = true },
+        },
+        // .{
+        //     .source = "x :=\"Hello\";x",
+        //     .expected = .{ .string = .ref("Hello") },
+        // },
+        .{
+            .source =
+            \\hello := "Hello";
+            \\world := "World";
+            \\world
+            ,
+            .expected = .{ .string = .ref("World") },
+        },
+        .{
+            .source =
+            \\hello := "Hello";
+            \\world := "World";
+            \\hello
+            ,
+            .expected = .{ .string = .ref("Hello") },
+        },
+        // .{
+        //     .source =
+        //     \\hello := "Hello";
+        //     \\world := "World";
+        //     \\hello + world
+        //     ,
+        //     .expected = .{ .string = .ref("HelloWorld") },
+        // },
+        // .{
+        //     .source =
+        //     \\hello := "Hello";
+        //     \\world := "World";
+        //     \\hello + ", " + world + "!"
+        //     ,
+        //     .expected = .{ .string = .ref("Hello, World!") },
+        // },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        var result = try testRunNoFree(gpa, t.source, w, w);
+        defer result.chunk.deinit();
+        // if (result.value == .string) {
+        //     dbg("value", result.value);
+        // }
+        try testing.expectEqualDeep(t.expected, result.value);
     }
 }

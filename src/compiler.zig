@@ -267,6 +267,15 @@ pub const Compiler = struct {
     }
 
     fn globalIdent(c: *Compiler, ident: Token) void {
+        const sym = c.sym_table.find(ident.lexeme);
+        if (!sym.resolved) {
+            c.resolveGlobalIdent(ident);
+        }
+        const location = c.resolveGlobalIdentLoc(ident);
+        c.emitLoad(location, ident.line);
+    }
+
+    fn resolveGlobalIdent(c: *Compiler, ident: Token) void {
         for (c.stmts[c.current_stmt + 1 ..]) |stmt| {
             if (stmt != .var_decl) continue;
 
@@ -274,22 +283,22 @@ pub const Compiler = struct {
             if (!mem.eql(u8, vd.ident.lexeme, ident.lexeme)) continue;
 
             const sym = c.sym_table.find(vd.ident.lexeme);
-            if (!sym.resolved) {
-                c.globalDecl(vd, sym);
-            }
-
-            for (c.global_locations.items, 0..) |global_ident, i| {
-                if (mem.eql(u8, global_ident, ident.lexeme)) {
-                    c.emitLoad(@intCast(i), ident.line);
-                    return;
-                }
-            }
+            c.globalDecl(vd, sym);
 
             unreachable;
         }
     }
 
-    fn resolveIdent(c: *Compiler, i: *Nir.Expr.Identifier) void {
+    fn resolveGlobalIdentLoc(c: *Compiler, ident: Token) u16 {
+        for (c.global_locations.items, 0..) |global_ident, i| {
+            if (mem.eql(u8, global_ident, ident.lexeme)) {
+                return @intCast(i);
+            }
+        }
+        unreachable;
+    }
+
+    fn identifier(c: *Compiler, i: *Nir.Expr.Identifier) void {
         // TODO: proper scopes
         c.globalIdent(i.ident);
     }
@@ -301,7 +310,7 @@ pub const Compiler = struct {
             .cast => |*ca| c.cast(ca, expr.type),
             .grouping => |*g| c.grouping(g),
             .literal => |*l| c.literal(l),
-            .identifier => |*i| c.resolveIdent(i),
+            .identifier => |*i| c.identifier(i),
         }
     }
 
@@ -526,6 +535,12 @@ const TestCase = struct {
     source: []const u8,
     expected_code: []const u8,
     expected_lines: []const u32,
+    expected_constants: []const Value,
+};
+
+const TestCaseMinimal = struct {
+    source: []const u8,
+    expected_code: []const u8,
     expected_constants: []const Value,
 };
 
@@ -793,7 +808,7 @@ test "string concatenation" {
     }
 }
 
-test "global variables" {
+test "global variables - simple op_store" {
     const gpa = testing.allocator;
     const tests: []const TestCase = &.{
         .{
@@ -817,6 +832,69 @@ test "global variables" {
 
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "global variables - op_load" {
+    const gpa = testing.allocator;
+    // zig fmt: off
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source = "x := 10; x;",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_store, 0, 0, .op_load, 0, 0, .op_return }),
+            .expected_constants = &.{.{ .integer = 10 }},
+        },
+        .{
+            .source = "x := 10; y := x;",
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_load, 0, 0,
+                .op_store, 1, 0,
+                .op_return,
+            }),
+            .expected_constants = &.{.{ .integer = 10 }},
+        },
+        .{
+            .source = "x := 10; y := x; x + y",
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_load, 0, 0,
+                .op_store, 1, 0,
+                .op_load, 0, 0,
+                .op_load, 1, 0,
+                .op_add_int,
+                .op_return,
+            }),
+            .expected_constants = &.{.{ .integer = 10 }},
+        },
+        .{
+            .source =
+            \\hello := "Hello";
+            \\world := "World";
+            \\hello
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_constant, 1,
+                .op_store, 1, 0,
+                .op_load, 0, 0,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .string = .ref("Hello") }, .{ .string = .ref("World") } }
+        }
+    };
+    // zig fmt: on
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
     }
 }

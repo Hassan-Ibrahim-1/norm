@@ -594,6 +594,14 @@ test "string concat" {
             .source = "\"Hello, \" + \"World\"",
             .expected = "(\"Hello, \" + \"World\")",
         },
+        .{
+            .source =
+            \\hello + ", " + world + "!"
+            ,
+            .expected =
+            \\(((hello + ", ") + world) + "!")
+            ,
+        },
     };
 
     for (tests) |t| {

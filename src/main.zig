@@ -98,14 +98,14 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
         defer gpa.free(stmts);
         try stderr.print("{s}\n", .{stmts});
 
-        // var chunk = compiler.compile(gpa, &nir);
-        // defer chunk.deinit();
-        //
-        // var vm = Vm.init(gpa, stdout, stderr);
-        // defer vm.deinit();
-        //
-        // const value = try vm.interpret(&chunk);
-        // try stdout.print("{f}\n", .{value});
+        var chunk = compiler.compile(gpa, &nir);
+        defer chunk.deinit();
+
+        var vm = Vm.init(gpa, stdout, stderr);
+        defer vm.deinit();
+
+        const value = try vm.interpret(&chunk);
+        try stdout.print("{f}\n", .{value});
     }
 }
 
