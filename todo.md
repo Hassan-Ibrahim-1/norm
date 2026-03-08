@@ -94,6 +94,13 @@ and their scopes and types, go through function bodies.
 
 How will structs and enums fit into this?
 
+_Runtime_
+
+op_store (stack_slot) (Value)
+op_load  (stack_slot)
+
+figure out how to order global variables to initialize them properly
+
 #### Language demo project
 
 Making a custom engine and doing some small demo in it would be nice. Radiance

@@ -255,6 +255,10 @@ pub const Vm = struct {
                     vm.push(.{ .float = @floatFromInt(a.integer) });
                 },
 
+                .op_pop => {
+                    _ = vm.pop();
+                },
+
                 .op_return => {
                     return vm.pop();
                 },

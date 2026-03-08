@@ -1,10 +1,19 @@
 const std = @import("std");
-const sema = @import("sema.zig");
-const Nir = @import("Nir.zig");
-const NormType = Nir.NormType;
-const Token = @import("Lexer.zig").Token;
 const mem = std.mem;
 const Allocator = mem.Allocator;
+const testing = std.testing;
+const Io = std.Io;
+const builtin = @import("builtin");
+
+const debug = @import("debug.zig");
+const dbg = debug.dbg;
+const ers = @import("errors.zig");
+const Lexer = @import("Lexer.zig");
+const Nir = @import("Nir.zig");
+const NormType = Nir.NormType;
+const parser = @import("parser.zig");
+const sema = @import("sema.zig");
+const Token = @import("Lexer.zig").Token;
 const Value = @import("value.zig").Value;
 
 pub const OpCode = enum(u8) {
@@ -90,6 +99,21 @@ pub const OpCode = enum(u8) {
     op_cast_to_int,
     op_cast_to_float,
 
+    // Store a value into a variable
+    // op_store <stack_slot: u16>
+    //
+    // VM: Pop a value off the stack and store it in the given <stack_slot>
+    op_store,
+
+    // Load the value of a variable
+    // op_load <stack_slot: u16>
+    //
+    // VM: Push a the value stored at <stack_slot> onto the top of the stack
+    op_load,
+
+    // VM: Pop a value off the stack and discard it
+    op_pop,
+
     // Temporary: Signals end of execution
     op_return,
 
@@ -124,6 +148,12 @@ pub const Chunk = struct {
 
     pub fn write(c: *Chunk, b: u8, line: u32) void {
         c.code.append(c.gpa, b) catch oom();
+        c.lines.append(c.gpa, line) catch oom();
+    }
+
+    pub fn writeShort(c: *Chunk, b: u16, line: u32) void {
+        const arr = c.code.addManyAsArray(c.gpa, 2) catch oom();
+        mem.writeInt(u16, arr, b, .little);
         c.lines.append(c.gpa, line) catch oom();
     }
 
@@ -167,15 +197,101 @@ pub const Chunk = struct {
     }
 };
 
+const ResolvedSymbol = struct {
+    ident: Token,
+    sym: Nir.Symbol,
+};
+
 pub const Compiler = struct {
     gpa: Allocator,
-    compiling_chunk: *Chunk,
+    scratch: Allocator,
 
-    pub fn init(gpa: Allocator, chunk: *Chunk) Compiler {
+    compiling_chunk: *Chunk,
+    sym_table: *Nir.SymbolTable,
+    stmts: []Nir.Stmt,
+    current_stmt: usize,
+    global_locations: std.ArrayList([]const u8),
+
+    fn init(gpa: Allocator, scratch: Allocator, nir: *Nir, chunk: *Chunk) Compiler {
         return .{
             .gpa = gpa,
+            .scratch = scratch,
             .compiling_chunk = chunk,
+            .sym_table = &nir.sym_table,
+            .stmts = nir.stmts,
+            .current_stmt = 0,
+            .global_locations = .empty,
         };
+    }
+
+    fn deinit(c: *Compiler) void {
+        c.global_locations.deinit(c.scratch);
+    }
+
+    fn compile(c: *Compiler) void {
+        for (c.stmts, 0..) |stmt, i| {
+            c.current_stmt = i;
+            c.statement(stmt);
+        }
+    }
+
+    fn statement(c: *Compiler, stmt: Nir.Stmt) void {
+        switch (stmt) {
+            .expression => |expr_stmt| {
+                c.expression(expr_stmt.expr);
+                if (!builtin.is_test) {
+                    c.emitOpCode(.op_pop, expr_stmt.expr.token().line);
+                }
+            },
+            .var_decl => |vd| {
+                const sym = c.sym_table.find(vd.ident.lexeme);
+                if (sym.scope.level == .top) {
+                    c.globalDecl(vd, sym);
+                }
+            },
+            .var_assign => @panic("todo"),
+        }
+    }
+
+    fn globalDecl(c: *Compiler, vd: Nir.Stmt.VarDecl, sym: *Nir.Symbol) void {
+        if (sym.resolved) return;
+
+        c.expression(vd.value);
+
+        const location = c.global_locations.items.len;
+        c.global_locations.append(c.scratch, vd.ident.lexeme) catch oom();
+
+        c.emitStore(@intCast(location), vd.ident.line);
+
+        sym.resolved = true;
+    }
+
+    fn globalIdent(c: *Compiler, ident: Token) void {
+        for (c.stmts[c.current_stmt + 1 ..]) |stmt| {
+            if (stmt != .var_decl) continue;
+
+            const vd = stmt.var_decl;
+            if (!mem.eql(u8, vd.ident.lexeme, ident.lexeme)) continue;
+
+            const sym = c.sym_table.find(vd.ident.lexeme);
+            if (!sym.resolved) {
+                c.globalDecl(vd, sym);
+            }
+
+            for (c.global_locations.items, 0..) |global_ident, i| {
+                if (mem.eql(u8, global_ident, ident.lexeme)) {
+                    c.emitLoad(@intCast(i), ident.line);
+                    return;
+                }
+            }
+
+            unreachable;
+        }
+    }
+
+    fn resolveIdent(c: *Compiler, i: *Nir.Expr.Identifier) void {
+        // TODO: proper scopes
+        c.globalIdent(i.ident);
     }
 
     fn expression(c: *Compiler, expr: *Nir.Expr) void {
@@ -185,7 +301,7 @@ pub const Compiler = struct {
             .cast => |*ca| c.cast(ca, expr.type),
             .grouping => |*g| c.grouping(g),
             .literal => |*l| c.literal(l),
-            .identifier => @panic("todo"),
+            .identifier => |*i| c.resolveIdent(i),
         }
     }
 
@@ -313,8 +429,22 @@ pub const Compiler = struct {
         c.emitOpCode(op2, line);
     }
 
+    fn emitStore(c: *Compiler, location: u16, line: u32) void {
+        c.emitOpCode(.op_store, line);
+        c.emitShort(location, line);
+    }
+
+    fn emitLoad(c: *Compiler, location: u16, line: u32) void {
+        c.emitOpCode(.op_load, line);
+        c.emitShort(location, line);
+    }
+
     fn emitByte(c: *Compiler, b: u8, line: u32) void {
         c.compiling_chunk.write(b, line);
+    }
+
+    fn emitShort(c: *Compiler, b: u16, line: u32) void {
+        c.compiling_chunk.writeShort(b, line);
     }
 
     fn emitBytes(c: *Compiler, a: u8, b: u8) void {
@@ -327,18 +457,15 @@ pub fn compile(gpa: Allocator, nir: *Nir) Chunk {
     if (nir.errors.len > 0) return .init(gpa);
 
     var chunk: Chunk = .init(gpa);
-    var c: Compiler = .init(gpa, &chunk);
+    var c: Compiler = .init(gpa, gpa, nir, &chunk);
+    defer c.deinit();
 
-    const expr = nir.stmts[0].expression.expr;
-    c.expression(expr);
+    c.compile();
 
     c.emitOpCode(.op_return, 0);
 
     return chunk;
 }
-
-const testing = std.testing;
-const debug = @import("debug.zig");
 
 test "basic chunk ops" {
     const gpa = testing.allocator;
@@ -364,11 +491,6 @@ test "basic chunk ops" {
 
 // TODO:
 test "chunk long instruction" {}
-
-const Lexer = @import("Lexer.zig");
-const parser = @import("parser.zig");
-const ers = @import("errors.zig");
-const Io = std.Io;
 
 fn testCompile(gpa: Allocator, source: []const u8) !Chunk {
     var l = Lexer.init(source);
@@ -406,8 +528,6 @@ const TestCase = struct {
     expected_lines: []const u32,
     expected_constants: []const Value,
 };
-
-const dbg = debug.dbg;
 
 test "literals" {
     const gpa = testing.allocator;
@@ -659,6 +779,34 @@ test "string concatenation" {
             .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_constant, 1, .op_concat, .op_return }),
             .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{ .{ .string = .ref("Hello, ") }, .{ .string = .ref("World") } },
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualSlices(u32, t.expected_lines, chunk.lines.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "global variables" {
+    const gpa = testing.allocator;
+    const tests: []const TestCase = &.{
+        .{
+            .source = "x := 10;",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_store, 0, 0, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 0 },
+            .expected_constants = &.{.{ .integer = 10 }},
+        },
+        .{
+            .source = "x := 10; y := false;",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_store, 0, 0, .op_false, .op_store, 1, 0, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 1, 0 },
+            .expected_constants = &.{.{ .integer = 10 }},
         },
     };
 

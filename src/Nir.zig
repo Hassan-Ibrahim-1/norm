@@ -28,6 +28,7 @@ pub const Scope = struct {
 pub const Symbol = struct {
     type: NormType,
     scope: *Scope,
+    resolved: bool = false,
 };
 
 pub const SymbolTable = struct {
@@ -86,8 +87,12 @@ pub const SymbolTable = struct {
         return scope;
     }
 
-    pub fn find(st: *SymbolTable, name: []const u8) ?*Symbol {
+    pub fn tryFind(st: *SymbolTable, name: []const u8) ?*Symbol {
         return st.top.getPtr(name);
+    }
+
+    pub fn find(st: *SymbolTable, name: []const u8) *Symbol {
+        return st.top.getPtr(name).?;
     }
 };
 

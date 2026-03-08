@@ -179,7 +179,7 @@ const Sema = struct {
                 return .{ .expression = .{ .expr = nir_expr } };
             },
             .var_decl => |vd| {
-                const sym = s.sym_table.find(vd.ident.lexeme).?;
+                const sym = s.sym_table.find(vd.ident.lexeme);
                 const value =
                     if (vd.value) |v|
                         s.expectTypeAutoCast(s.expression(v), sym.type)
@@ -361,7 +361,7 @@ const Sema = struct {
     }
 
     fn identifier(s: *Sema, i: *Ast.Expr.Identifier) *Nir.Expr {
-        const sym = s.sym_table.find(i.ident.lexeme) orelse return s.undefinedVariable(i.ident);
+        const sym = s.sym_table.tryFind(i.ident.lexeme) orelse return s.undefinedVariable(i.ident);
         return makeIdentifier(s.arena, i.ident, sym.scope, sym.type);
     }
 
@@ -1007,6 +1007,10 @@ test "variable declaration - type inference" {
         .{
             .source = "x := \"Hello, \" + \"World\";",
             .expected = "x: string = (\"Hello, \" + \"World\"):string;",
+        },
+        .{
+            .source = "x := 10 + 2; y := x * 3;",
+            .expected = "x: int = (10 + 2):int;\ny: int = (x:int * 3):int;",
         },
     };
 
