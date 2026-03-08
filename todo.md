@@ -63,8 +63,8 @@ could be pointers to a debug info table. Would allow variable/function names, ty
 
 Each pass should take ownership over the last IR
 
-There should be a constant string table like how compiled languages do it. No
-need for extra allocations.
+Bug in VM: I think its something to do with popping too much. Get the stack
+visualization running and it should be easy to debug.
 
 #### Notes on heap allocation
 

@@ -256,7 +256,7 @@ pub const Vm = struct {
                 },
 
                 .op_store => {
-                    const value = vm.pop();
+                    const value = vm.peek();
                     const stack_slot = vm.readShort();
                     vm.stack[stack_slot] = value;
                 },
@@ -313,6 +313,10 @@ pub const Vm = struct {
     fn push(vm: *Vm, value: Value) void {
         vm.stack_top[0] = value;
         vm.stack_top += 1;
+    }
+
+    fn peek(vm: *Vm) Value {
+        return (vm.stack_top - 1)[0];
     }
 
     fn pop(vm: *Vm) Value {
@@ -617,6 +621,10 @@ test "variable - simple store and load" {
             .expected = .{ .integer = 10 },
         },
         .{
+            .source = "x := 5; x + x",
+            .expected = .{ .integer = 10 },
+        },
+        .{
             .source = "x := 10; y := x; y + 10",
             .expected = .{ .integer = 20 },
         },
@@ -624,10 +632,10 @@ test "variable - simple store and load" {
             .source = "x := 10; y := x * 3 + 1; y + 10 == 41",
             .expected = .{ .boolean = true },
         },
-        // .{
-        //     .source = "x :=\"Hello\";x",
-        //     .expected = .{ .string = .ref("Hello") },
-        // },
+        .{
+            .source = "x :=\"Hello\";x",
+            .expected = .{ .string = .ref("Hello") },
+        },
         .{
             .source =
             \\hello := "Hello";
@@ -644,31 +652,28 @@ test "variable - simple store and load" {
             ,
             .expected = .{ .string = .ref("Hello") },
         },
-        // .{
-        //     .source =
-        //     \\hello := "Hello";
-        //     \\world := "World";
-        //     \\hello + world
-        //     ,
-        //     .expected = .{ .string = .ref("HelloWorld") },
-        // },
-        // .{
-        //     .source =
-        //     \\hello := "Hello";
-        //     \\world := "World";
-        //     \\hello + ", " + world + "!"
-        //     ,
-        //     .expected = .{ .string = .ref("Hello, World!") },
-        // },
+        .{
+            .source =
+            \\hello := "Hello";
+            \\world := "World";
+            \\hello + world
+            ,
+            .expected = .{ .string = .ref("HelloWorld") },
+        },
+        .{
+            .source =
+            \\hello := "Hello";
+            \\world := "World";
+            \\hello + ", " + world + "!"
+            ,
+            .expected = .{ .string = .ref("Hello, World!") },
+        },
     };
 
     for (tests) |t| {
         errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
         var result = try testRunNoFree(gpa, t.source, w, w);
         defer result.chunk.deinit();
-        // if (result.value == .string) {
-        //     dbg("value", result.value);
-        // }
         try testing.expectEqualDeep(t.expected, result.value);
     }
 }
