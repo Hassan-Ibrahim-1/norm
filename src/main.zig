@@ -30,6 +30,17 @@ pub fn main() !void {
     var stderr_w = std.fs.File.stderr().writer(&stderr_buf);
     const stderr = &stderr_w.interface;
 
+    defer {
+        stderr.flush() catch unreachable;
+        stdout.flush() catch unreachable;
+    }
+
+    if (args.len > 2) {
+        try stderr.print("norm: usage: norm [file]\n", .{});
+        try stderr.flush();
+        return;
+    }
+
     if (args.len == 2)
         try runFile(alloc, args[1], stdout, stderr)
     else
@@ -37,14 +48,46 @@ pub fn main() !void {
 }
 
 fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !void {
-    _ = stderr; // autofix
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
     const source = try file.readToEndAlloc(gpa, 1_000_000);
     defer gpa.free(source);
 
-    try stdout.flush();
+    var lexer = Lexer.init(source);
+    const tokens = lexer.scanTokens(gpa);
+    defer {
+        gpa.free(tokens.tokens);
+        gpa.free(tokens.errors);
+    }
+    if (tokens.errors.len > 0) {
+        for (tokens.errors) |diag| {
+            try stderr.print("{s}\n", .{diag.error_msg});
+        }
+        return;
+    }
+
+    var ast = parser.parse(gpa, tokens.tokens, false);
+    defer ast.arena.deinit();
+    if (ast.errors.len > 0) {
+        debug.reportErrors(ast.errors, path, source);
+        return;
+    }
+
+    var nir = sema.analyze(gpa, &ast);
+    defer nir.deinit();
+    if (nir.errors.len > 0) {
+        debug.reportErrors(nir.errors, path, source);
+        return;
+    }
+
+    var chunk = compiler.compile(gpa, &nir);
+    defer chunk.deinit();
+
+    var vm = Vm.init(gpa, stdout, stderr);
+    defer vm.deinit();
+
+    _ = try vm.interpret(&chunk);
 }
 
 fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.File) !void {

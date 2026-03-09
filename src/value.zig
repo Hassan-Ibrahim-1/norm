@@ -20,8 +20,11 @@ pub const Value = union(enum) {
 
     pub fn format(v: *const Value, w: *Io.Writer) Io.Writer.Error!void {
         try switch (v.*) {
-            .string => |s| w.print(".{{ .string = \"{s}\" }}", .{s.data}),
-            else => w.print("{any}", .{v}),
+            .string => |s| w.print("{s}", .{s.data}),
+            .integer => |i| w.print("{}", .{i}),
+            .float => |f| w.print("{d:.3}", .{f}),
+            .boolean => |b| w.print("{}", .{b}),
+            .nil => w.print("nil", .{}),
         };
     }
 };
