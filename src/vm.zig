@@ -607,7 +607,7 @@ test "string comparisons" {
     }
 }
 
-test "variable - simple store and load" {
+test "variables - simple store and load" {
     const gpa = testing.allocator;
     var discarding: Io.Writer.Discarding = .init(&.{});
     const w = &discarding.writer;
@@ -669,6 +669,27 @@ test "variable - simple store and load" {
             .expected = .{ .string = .ref("Hello, World!") },
         },
     };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        var result = try testRunNoFree(gpa, t.source, w, w);
+        defer result.chunk.deinit();
+        try testing.expectEqualDeep(t.expected, result.value);
+    }
+}
+
+test "variables - irrelevance of declaration order" {
+    const gpa = testing.allocator;
+    var discarding: Io.Writer.Discarding = .init(&.{});
+    const w = &discarding.writer;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{.{
+        .source = "x := y; y := 1; x",
+        .expected = .{ .integer = 1 },
+    }};
 
     for (tests) |t| {
         errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
