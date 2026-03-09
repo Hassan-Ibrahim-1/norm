@@ -108,6 +108,7 @@ const Parser = struct {
         .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_float
         .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_bool
         .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_string
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_print
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _error
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // eof,
     };
@@ -140,8 +141,21 @@ const Parser = struct {
                 return p.varDecl();
             }
             // p.reportError(.{ .error_msg = "idk man", .line = p.previous.line });
+        } else if (p.match(.kw_print)) {
+            return p.printStmt();
         }
         return p.expressionStmt();
+    }
+
+    fn printStmt(p: *Parser) Ast.Stmt {
+        const print = p.previous;
+        p.consume(.left_paren, "Expect '(' after print");
+        const expr = p.expression(.lowest);
+
+        p.consume(.right_paren, "Expect ')' after print");
+        p.consumeSemicolon();
+
+        return .{ .print = .{ .print = print, .expr = expr } };
     }
 
     fn expressionStmt(p: *Parser) Ast.Stmt {
@@ -816,5 +830,30 @@ test "full variable declarations" {
         const parsed = try testParseStmts(gpa, t.source);
         defer gpa.free(parsed);
         try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
+
+test "temporary print stmt" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "print(10);",
+            .expected = "print(10);",
+        },
+        .{
+            .source = "x := 10; print(x);",
+            .expected = "x := 10;\nprint(x);",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testParseStmts(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
     }
 }

@@ -190,6 +190,10 @@ const Sema = struct {
 
                 return .{ .var_decl = .{ .ident = vd.ident, .value = value.?, .type = sym.type } };
             },
+            .print => |p| {
+                const nir_expr = s.expression(p.expr);
+                return .{ .print = .{ .print = p.print, .expr = nir_expr } };
+            },
             .var_assign => @panic("todo"),
         }
     }
@@ -1011,6 +1015,31 @@ test "variable declaration - type inference" {
         .{
             .source = "x := 10 + 2; y := x * 3;",
             .expected = "x: int = (10 + 2):int;\ny: int = (x:int * 3):int;",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "temporary print stmt" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "print(10);",
+            .expected = "print(10);",
+        },
+        .{
+            .source = "x := 10; print(x);",
+            .expected = "x: int = 10;\nprint(x:int);",
         },
     };
 

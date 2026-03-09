@@ -64,7 +64,17 @@ pub const Stmt = union(enum) {
         }
     };
 
+    pub const Print = struct {
+        print: Token,
+        expr: *Expr,
+
+        pub fn format(p: *const Stmt.Print, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("print({f});", .{p.expr});
+        }
+    };
+
     expression: Expression,
+    print: Print,
     var_decl: VarDecl,
     var_assign: VarAssign,
 

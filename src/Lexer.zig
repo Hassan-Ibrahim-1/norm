@@ -66,6 +66,7 @@ pub const Token = struct {
         kw_float,
         kw_bool,
         kw_string,
+        kw_print,
 
         _error,
         eof,
@@ -280,6 +281,8 @@ fn identifierType(l: *Lexer) Token.Type {
             }
         else
             .identifier,
+
+        'p' => l.checkKeyword(1, "rint", .kw_print),
 
         'r' => if (l.current > l.start)
             switch (l.source[l.start + 1]) {
@@ -647,13 +650,14 @@ test "more tokens" {
             },
         },
         .{
-            .source = "int float bool string struct",
+            .source = "int float bool string struct print",
             .expected = &.{
                 testToken("int", .kw_int),
                 testToken("float", .kw_float),
                 testToken("bool", .kw_bool),
                 testToken("string", .kw_string),
                 testToken("struct", .kw_struct),
+                testToken("print", .kw_print),
                 testToken("", .eof),
             },
         },

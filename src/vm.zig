@@ -266,6 +266,11 @@ pub const Vm = struct {
                     vm.push(vm.stack[stack_slot]);
                 },
 
+                .op_temp_print => {
+                    const value = vm.pop();
+                    vm.stdout.print("{f}\n", .{value}) catch unreachable;
+                },
+
                 .op_pop => {
                     _ = vm.pop();
                 },

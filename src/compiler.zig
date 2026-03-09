@@ -111,6 +111,11 @@ pub const OpCode = enum(u8) {
     // VM: Push a the value stored at <stack_slot> onto the top of the stack
     op_load,
 
+    // Temporary opcode to print a value
+    //
+    // VM: Pop a value off the stack and print it
+    op_temp_print,
+
     // VM: Pop a value off the stack and discard it
     op_pop,
 
@@ -248,6 +253,10 @@ pub const Compiler = struct {
                 if (sym.scope.level == .top) {
                     c.globalDecl(vd, sym);
                 }
+            },
+            .print => |p| {
+                c.expression(p.expr);
+                c.emitOpCode(.op_temp_print, p.print.line);
             },
             .var_assign => @panic("todo"),
         }
@@ -888,6 +897,26 @@ test "global variables - op_load" {
         }
     };
     // zig fmt: on
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "temporary print opcode" {
+    const gpa = testing.allocator;
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source = "print(10);",
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_temp_print, .op_return }),
+            .expected_constants = &.{.{ .integer = 10 }},
+        },
+    };
 
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
