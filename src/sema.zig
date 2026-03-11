@@ -1027,6 +1027,27 @@ test "variable declaration - type inference" {
     }
 }
 
+test "variable declaration - irrelevance of declaration order" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "x := y; y := 1; x",
+            .expected = "x: int = y:int;\ny:int = 1;\nx:int;",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
 test "temporary print stmt" {
     const gpa = testing.allocator;
     const tests: []const struct {

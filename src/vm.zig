@@ -691,10 +691,12 @@ test "variables - irrelevance of declaration order" {
     const tests: []const struct {
         source: []const u8,
         expected: Value,
-    } = &.{.{
-        .source = "x := y; y := 1; x",
-        .expected = .{ .integer = 1 },
-    }};
+    } = &.{
+        .{
+            .source = "x := y; y := 1; x",
+            .expected = .{ .integer = 1 },
+        },
+    };
 
     for (tests) |t| {
         errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});

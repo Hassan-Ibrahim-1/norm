@@ -163,6 +163,7 @@ pub const Stmt = union(enum) {
         value: *Expr,
 
         pub fn format(vd: *const Stmt.VarDecl, w: *Io.Writer) Io.Writer.Error!void {
+            debug.dbg();
             try w.print("{s}: {f} = {f};", .{ vd.ident.lexeme, vd.type, vd.value });
         }
     };
@@ -318,7 +319,10 @@ pub const Expr = struct {
     }
 
     pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
-        if (expr.type == .n_invalid) return w.print("invalid - an error was not reported", .{});
+        if (expr.type == .n_invalid) {
+            @panic("invalid - an error was not reported");
+        }
+
         try switch (expr.kind) {
             inline .cast, .literal => |l| w.print("{f}", .{l}),
             inline else => |b| w.print("{f}:{f}", .{ b, expr.type }),
