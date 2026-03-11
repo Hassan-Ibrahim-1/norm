@@ -36,15 +36,13 @@ pub fn main() !void {
     }
 
     if (args.len > 2) {
-        try stderr.print("norm: usage: norm [file]\n", .{});
+        try stderr.print("usage: norm [file]\n", .{});
         try stderr.flush();
-        return;
-    }
-
-    if (args.len == 2)
-        try runFile(alloc, args[1], stdout, stderr)
-    else
+    } else if (args.len == 2) {
+        try runFile(alloc, args[1], stdout, stderr);
+    } else {
         try repl(alloc, stdout, stderr, stdin);
+    }
 }
 
 fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !void {
