@@ -152,13 +152,9 @@ const Sema = struct {
                             s.analyzeTypeExpr(type_expr)
                         else
                             .n_invalid;
-                    const already_exists = s.sym_table.registerGlobal(vd.ident.lexeme, var_type);
+                    const already_exists = s.sym_table.register(vd.ident.lexeme, var_type);
                     if (already_exists) {
-                        s.reportErrorLine(
-                            vd.ident.line,
-                            "Variable {s} is already defined",
-                            .{vd.ident.lexeme},
-                        );
+                        s.redefinedVariable(vd.ident);
                     }
                 },
                 else => {},
@@ -186,7 +182,11 @@ const Sema = struct {
                 return .{ .expression = .{ .expr = nir_expr } };
             },
             .var_decl => |vd| {
-                const sym = s.sym_table.find(vd.ident.lexeme);
+                const sym = s.sym_table.findOrRegister(vd.ident.lexeme) orelse {
+                    s.redefinedVariable(vd.ident);
+                    return .invalid;
+                };
+
                 const value =
                     if (vd.value) |v|
                         s.expectTypeAutoCast(s.expression(v), sym.type)
@@ -203,6 +203,10 @@ const Sema = struct {
             },
             .block => |block| {
                 var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
+
+                s.beginScope();
+                defer s.endScope();
+
                 for (block.stmts) |b_stmt| {
                     const nir_stmt = s.statement(b_stmt);
                     nir_stmts.append(s.arena, nir_stmt) catch oom();
@@ -211,6 +215,14 @@ const Sema = struct {
             },
             .var_assign => @panic("todo"),
         }
+    }
+
+    fn beginScope(s: *Sema) void {
+        s.sym_table.beginScope();
+    }
+
+    fn endScope(s: *Sema) void {
+        s.sym_table.endScope();
     }
 
     fn expectedTypeExprErr(s: *Sema, expr: *Ast.Expr) NormType {
@@ -387,6 +399,14 @@ const Sema = struct {
     fn undefinedVariable(s: *Sema, name: Token) *Nir.Expr {
         s.reportErrorLine(name.line, "Undefined variable {s}", .{name.lexeme});
         return s.invalid_expr;
+    }
+
+    fn redefinedVariable(s: *Sema, name: Token) void {
+        s.reportErrorLine(
+            name.line,
+            "Variable {s} is already defined",
+            .{name.lexeme},
+        );
     }
 
     fn literal(s: *Sema, l: *Ast.Expr.Literal) *Nir.Expr {

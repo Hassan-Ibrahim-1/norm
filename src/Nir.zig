@@ -6,6 +6,7 @@ const std = @import("std");
 const mem = std.mem;
 const Io = std.Io;
 
+const assert = std.debug.assert;
 const Allocator = mem.Allocator;
 const Ast = @import("Ast.zig");
 const debug = @import("debug.zig");
@@ -34,13 +35,13 @@ pub const SymbolTable = struct {
     gpa: Allocator,
     top: SymMap,
     scope_arena: std.heap.ArenaAllocator,
-    locals: std.ArrayList(Locals),
+    locals: std.AutoHashMapUnmanaged(*Scope, Locals),
     top_scope: *Scope,
+    current_scope: *Scope,
 
     pub const SymMap = std.StringHashMapUnmanaged(Symbol);
 
     pub const Locals = struct {
-        parent: *Locals,
         locals: SymMap,
     };
 
@@ -56,6 +57,7 @@ pub const SymbolTable = struct {
             .gpa = gpa,
             .scope_arena = scope_arena,
             .top_scope = top_scope,
+            .current_scope = top_scope,
             .top = .empty,
             .locals = .empty,
         };
@@ -69,33 +71,86 @@ pub const SymbolTable = struct {
     }
 
     /// returns true if the symbol already exists
-    pub fn registerGlobal(st: *SymbolTable, name: []const u8, ty: NormType) bool {
-        const sym: Symbol = .{ .type = ty, .scope = st.top_scope };
-        return st.registerSym(name, sym);
+    pub fn register(st: *SymbolTable, name: []const u8, ty: NormType) bool {
+        if (st.symDefined(name, st.current_scope)) return true;
+
+        const sym: Symbol = .{ .type = ty, .scope = st.current_scope };
+        st.registerSym(name, sym);
+
+        return false;
     }
 
-    /// returns true if the symbol already exists
-    fn registerSym(st: *SymbolTable, name: []const u8, sym: Symbol) bool {
-        const gop = st.top.getOrPut(st.gpa, name) catch oom();
-        if (!gop.found_existing) gop.value_ptr.* = sym;
-        return gop.found_existing;
+    fn registerSym(st: *SymbolTable, name: []const u8, sym: Symbol) void {
+        switch (st.current_scope.level) {
+            .top => {
+                st.top.put(st.gpa, name, sym) catch oom();
+            },
+            .local => {
+                const locals = st.locals.getPtr(st.current_scope).?;
+                locals.locals.put(st.gpa, name, sym) catch oom();
+            },
+        }
+    }
+
+    fn symDefined(st: *SymbolTable, name: []const u8, scope: *Scope) bool {
+        switch (scope.level) {
+            .top => {
+                return st.top.contains(name);
+            },
+            .local => {
+                const locals = st.locals.get(scope).?;
+                return locals.locals.contains(name) or st.symDefined(name, scope.parent);
+            },
+        }
+    }
+
+    pub fn beginScope(st: *SymbolTable) void {
+        const new_scope = st.newScope(.local, st.current_scope);
+        st.locals.put(st.gpa, new_scope, .{ .locals = .empty }) catch oom();
+        st.current_scope = new_scope;
+    }
+
+    pub fn endScope(st: *SymbolTable) void {
+        assert(st.current_scope.level != .top);
+        st.current_scope = st.current_scope.parent;
     }
 
     fn newScope(st: *SymbolTable, scope_level: Scope.Level, parent: *Scope) *Scope {
         const scope = st.scope_arena.allocator().create(Scope) catch oom();
         scope.* = .{
-            .scope_level = scope_level,
+            .level = scope_level,
             .parent = parent,
         };
         return scope;
     }
 
     pub fn tryFind(st: *SymbolTable, name: []const u8) ?*Symbol {
-        return st.top.getPtr(name);
+        return st.findSym(name, st.current_scope);
     }
 
     pub fn find(st: *SymbolTable, name: []const u8) *Symbol {
-        return st.top.getPtr(name).?;
+        return st.findSym(name, st.current_scope).?;
+    }
+
+    fn findSym(st: *SymbolTable, name: []const u8, scope: *Scope) ?*Symbol {
+        switch (scope.level) {
+            .top => return st.top.getPtr(name),
+            .local => {
+                const locals = st.locals.getPtr(scope).?;
+                return locals.locals.getPtr(name) orelse st.findSym(name, scope.parent);
+            },
+        }
+    }
+
+    /// If the return value is null then it means that the symbol
+    /// has already been defined.
+    pub fn findOrRegister(st: *SymbolTable, name: []const u8) ?*Symbol {
+        const sym = st.tryFind(name) orelse {
+            const already_exists = st.register(name, .n_invalid);
+            if (already_exists) return null;
+            return st.tryFind(name).?;
+        };
+        return sym;
     }
 };
 
