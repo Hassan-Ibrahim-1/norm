@@ -167,7 +167,15 @@ const Sema = struct {
 
         var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
 
+        // Temporary, remove when functions are implemented
         for (stmts) |stmt| {
+            if (stmt != .var_decl) continue;
+            const nir_stmt = s.statement(stmt);
+            nir_stmts.append(s.arena, nir_stmt) catch oom();
+        }
+
+        for (stmts) |stmt| {
+            if (stmt == .var_decl) continue;
             const nir_stmt = s.statement(stmt);
             nir_stmts.append(s.arena, nir_stmt) catch oom();
         }
@@ -204,21 +212,25 @@ const Sema = struct {
             .block => |block| {
                 var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
 
-                s.beginScope();
+                const block_scope = s.beginScope();
                 defer s.endScope();
 
                 for (block.stmts) |b_stmt| {
                     const nir_stmt = s.statement(b_stmt);
                     nir_stmts.append(s.arena, nir_stmt) catch oom();
                 }
-                return .{ .block = .{ .token = block.token, .stmts = nir_stmts.items } };
+                return .{ .block = .{
+                    .token = block.token,
+                    .stmts = nir_stmts.items,
+                    .scope = block_scope,
+                } };
             },
             .var_assign => @panic("todo"),
         }
     }
 
-    fn beginScope(s: *Sema) void {
-        s.sym_table.beginScope();
+    fn beginScope(s: *Sema) *Nir.Scope {
+        return s.sym_table.beginScope();
     }
 
     fn endScope(s: *Sema) void {
@@ -1132,6 +1144,339 @@ test "block statements" {
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "block scopes" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\{
+            \\    x := 1;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    x: int = 1;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\{
+            \\    y := x + 2;
+            \\}
+            ,
+            .expected =
+            \\x: int = 1;
+            \\{
+            \\    y: int = (x:int + 2):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    y := "Hey";
+            \\}
+            \\{
+            \\    y := 1 + 2;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    y: string = "Hey";
+            \\}
+            \\{
+            \\    y: int = (1 + 2):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    y := x;
+            \\}
+            \\x := 10;
+            ,
+            .expected =
+            \\x: int = 10;
+            \\{
+            \\    y: int = x:int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    y := float(x) + 2;
+            \\}
+            \\x := 10;
+            ,
+            .expected =
+            \\x: int = 10;
+            \\{
+            \\    y: float = (float(x:int) + float(2)):float;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    {
+            \\        x := 1;
+            \\    }
+            \\    x := 2;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    {
+            \\    x: int = 1;
+            \\}
+            \\    x: int = 2;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 1;
+            \\    {
+            \\        y := 2;
+            \\        {
+            \\            z := x + y;
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    x: int = 1;
+            \\    {
+            \\    y: int = 2;
+            \\    {
+            \\    z: int = (x:int + y:int):int;
+            \\}
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\x := 10;
+            \\{
+            \\    y := x * 2;
+            \\    {
+            \\        z := y + x;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\x: int = 10;
+            \\{
+            \\    y: int = (x:int * 2):int;
+            \\    {
+            \\    z: int = (y:int + x:int):int;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 1;
+            \\    {
+            \\        b := a + 1;
+            \\        c := a + b;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    a: int = 1;
+            \\    {
+            \\    b: int = (a:int + 1):int;
+            \\    c: int = (a:int + b:int):int;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\{
+            \\    print(x);
+            \\    y := x + 1;
+            \\    print(y);
+            \\}
+            ,
+            .expected =
+            \\x: int = 1;
+            \\{
+            \\    print(x:int);
+            \\    y: int = (x:int + 1):int;
+            \\    print(y:int);
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\x := 10;
+            \\{
+            \\    y := 1;
+            \\    z := 2;
+            \\}
+            ,
+            .expected =
+            \\x: int = 10;
+            \\{
+            \\    y: int = 1;
+            \\    z: int = 2;
+            \\}
+            ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "scoping errors - undefined and redefined variables" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\x := 1;
+            \\{
+            \\    y := x + 2;
+            \\}
+            \\y := false;
+            ,
+            .error_msg = "Variable y is already defined",
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\y := false;
+            \\{
+            \\    y := x + 2;
+            \\}
+            ,
+            .error_msg = "Variable y is already defined",
+        },
+        .{
+            .source =
+            \\{
+            \\    y := 1 + 2;
+            \\}
+            \\y + 3;
+            ,
+            .error_msg = "Undefined variable y",
+        },
+        .{
+            .source =
+            \\{
+            \\    y := x + 2;
+            \\}
+            ,
+            .error_msg = "Undefined variable x",
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 3;
+            \\}
+            \\{
+            \\    y := x + 2;
+            \\}
+            ,
+            .error_msg = "Undefined variable x",
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 1;
+            \\    {
+            \\        y := x + 2;
+            \\    }
+            \\    z := y + 1;
+            \\}
+            ,
+            .error_msg = "Undefined variable y",
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\x := 2;
+            ,
+            .error_msg = "Variable x is already defined",
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 1;
+            \\    x := 2;
+            \\}
+            ,
+            .error_msg = "Variable x is already defined",
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 1;
+            \\    a := 2;
+            \\    {
+            \\        b := a + 1;
+            \\    }
+            \\    b := 10;
+            \\}
+            ,
+            .error_msg = "Variable a is already defined",
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\y := 2;
+            \\z := w;
+            ,
+            .error_msg = "Undefined variable w",
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 1;
+            \\}
+            \\{
+            \\    y := x + 1;
+            \\}
+            \\x := 2;
+            ,
+            .error_msg = "Variable x is already defined",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
     }
 }
 

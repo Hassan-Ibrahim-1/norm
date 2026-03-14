@@ -34,7 +34,7 @@ pub const Symbol = struct {
 pub const SymbolTable = struct {
     gpa: Allocator,
     top: SymMap,
-    scope_arena: std.heap.ArenaAllocator,
+    arena: std.heap.ArenaAllocator,
     locals: std.AutoHashMapUnmanaged(*Scope, Locals),
     top_scope: *Scope,
     current_scope: *Scope,
@@ -46,8 +46,8 @@ pub const SymbolTable = struct {
     };
 
     pub fn init(gpa: Allocator) SymbolTable {
-        var scope_arena: std.heap.ArenaAllocator = .init(gpa);
-        const top_scope = scope_arena.allocator().create(Scope) catch oom();
+        var arena: std.heap.ArenaAllocator = .init(gpa);
+        const top_scope = arena.allocator().create(Scope) catch oom();
         top_scope.* = .{
             .parent = undefined,
             .level = .top,
@@ -55,7 +55,7 @@ pub const SymbolTable = struct {
 
         return .{
             .gpa = gpa,
-            .scope_arena = scope_arena,
+            .arena = arena,
             .top_scope = top_scope,
             .current_scope = top_scope,
             .top = .empty,
@@ -64,9 +64,7 @@ pub const SymbolTable = struct {
     }
 
     pub fn deinit(st: *SymbolTable) void {
-        st.scope_arena.deinit();
-        st.top.deinit(st.gpa);
-        st.locals.deinit(st.gpa);
+        st.arena.deinit();
         st.* = undefined;
     }
 
@@ -83,11 +81,11 @@ pub const SymbolTable = struct {
     fn registerSym(st: *SymbolTable, name: []const u8, sym: Symbol) void {
         switch (st.current_scope.level) {
             .top => {
-                st.top.put(st.gpa, name, sym) catch oom();
+                st.top.put(st.arena.allocator(), name, sym) catch oom();
             },
             .local => {
                 const locals = st.locals.getPtr(st.current_scope).?;
-                locals.locals.put(st.gpa, name, sym) catch oom();
+                locals.locals.put(st.arena.allocator(), name, sym) catch oom();
             },
         }
     }
@@ -104,10 +102,11 @@ pub const SymbolTable = struct {
         }
     }
 
-    pub fn beginScope(st: *SymbolTable) void {
+    pub fn beginScope(st: *SymbolTable) *Scope {
         const new_scope = st.newScope(.local, st.current_scope);
-        st.locals.put(st.gpa, new_scope, .{ .locals = .empty }) catch oom();
+        st.locals.put(st.arena.allocator(), new_scope, .{ .locals = .empty }) catch oom();
         st.current_scope = new_scope;
+        return new_scope;
     }
 
     pub fn endScope(st: *SymbolTable) void {
@@ -116,7 +115,7 @@ pub const SymbolTable = struct {
     }
 
     fn newScope(st: *SymbolTable, scope_level: Scope.Level, parent: *Scope) *Scope {
-        const scope = st.scope_arena.allocator().create(Scope) catch oom();
+        const scope = st.arena.allocator().create(Scope) catch oom();
         scope.* = .{
             .level = scope_level,
             .parent = parent,
@@ -128,8 +127,8 @@ pub const SymbolTable = struct {
         return st.findSym(name, st.current_scope);
     }
 
-    pub fn find(st: *SymbolTable, name: []const u8) *Symbol {
-        return st.findSym(name, st.current_scope).?;
+    pub fn find(st: *SymbolTable, name: []const u8, scope: *Scope) *Symbol {
+        return st.findSym(name, scope).?;
     }
 
     fn findSym(st: *SymbolTable, name: []const u8, scope: *Scope) ?*Symbol {
@@ -145,12 +144,12 @@ pub const SymbolTable = struct {
     /// If the return value is null then it means that the symbol
     /// has already been defined.
     pub fn findOrRegister(st: *SymbolTable, name: []const u8) ?*Symbol {
-        const sym = st.tryFind(name) orelse {
-            const already_exists = st.register(name, .n_invalid);
-            if (already_exists) return null;
-            return st.tryFind(name).?;
-        };
-        return sym;
+        if (st.current_scope.level == .top) {
+            return st.tryFind(name);
+        }
+        const already_exists = st.register(name, .n_invalid);
+        if (already_exists) return null;
+        return st.tryFind(name).?;
     }
 };
 
@@ -237,6 +236,7 @@ pub const Stmt = union(enum) {
     pub const Block = struct {
         token: Token, // {
         stmts: []Stmt,
+        scope: *Scope,
 
         pub fn format(b: *const Stmt.Block, w: *Io.Writer) Io.Writer.Error!void {
             try w.writeAll("{\n");

@@ -216,10 +216,17 @@ pub const Compiler = struct {
     stmts: []Nir.Stmt,
     global_locations: std.ArrayList([]const u8),
 
+    current_scope: *Nir.Scope,
+    current_scope_sym_count: usize,
+    scope_depth: usize,
+
     fn init(gpa: Allocator, scratch: Allocator, nir: *Nir, chunk: *Chunk) Compiler {
         return .{
             .gpa = gpa,
             .scratch = scratch,
+            .current_scope = nir.sym_table.top_scope,
+            .current_scope_sym_count = 0,
+            .scope_depth = 0,
             .compiling_chunk = chunk,
             .sym_table = &nir.sym_table,
             .stmts = nir.stmts,
@@ -246,7 +253,7 @@ pub const Compiler = struct {
                 }
             },
             .var_decl => |vd| {
-                const sym = c.sym_table.find(vd.ident.lexeme);
+                const sym = c.findSym(vd.ident.lexeme);
                 if (sym.scope.level == .top) {
                     c.globalDecl(vd);
                 }
@@ -256,11 +263,18 @@ pub const Compiler = struct {
                 c.emitOpCode(.op_temp_print, p.print.line);
             },
             .var_assign => @panic("todo"),
-            .block => |p| {
-                _ = p; // autofix
-                @panic("todo");
+            .block => |block| {
+                c.current_scope = block.scope;
+                defer c.current_scope = c.current_scope.parent;
+                for (block.stmts) |block_stmt| {
+                    c.statement(block_stmt);
+                }
             },
         }
+    }
+
+    fn findSym(c: *Compiler, name: []const u8) *Nir.Symbol {
+        return c.sym_table.find(name, c.current_scope);
     }
 
     fn globalDecl(c: *Compiler, vd: Nir.Stmt.VarDecl) void {
@@ -272,9 +286,27 @@ pub const Compiler = struct {
         c.emitStore(@intCast(location), vd.ident.line);
     }
 
+    fn localDecl(c: *Compiler, vd: Nir.Stmt.VarDecl) void {
+        c.expression(vd.value);
+
+        const location = c.global_locations.items.len;
+        c.global_locations.append(c.scratch, vd.ident.lexeme) catch oom();
+
+        c.emitStore(@intCast(location), vd.ident.line);
+    }
+
     fn globalIdent(c: *Compiler, ident: Token) void {
         const location = c.resolveGlobalIdentLoc(ident);
         c.emitLoad(location, ident.line);
+    }
+
+    fn resolveLocalIdentLoc(c: *Compiler, ident: Token) u16 {
+        for (c.global_locations.items, 0..) |global_ident, i| {
+            if (mem.eql(u8, global_ident, ident.lexeme)) {
+                return @intCast(i);
+            }
+        }
+        unreachable;
     }
 
     fn resolveGlobalIdentLoc(c: *Compiler, ident: Token) u16 {

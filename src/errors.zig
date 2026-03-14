@@ -43,7 +43,7 @@ fn getLines(str: []const u8, line: u32, surrounding: u32) []const u8 {
     var iter = mem.splitScalar(u8, str, '\n');
 
     var start_index: usize = 0;
-    var end_index: usize = str.len;
+    var end_index = str.len;
 
     var i: usize = 0;
     var previous_index: usize = 0;
