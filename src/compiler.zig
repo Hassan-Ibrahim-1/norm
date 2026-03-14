@@ -256,6 +256,10 @@ pub const Compiler = struct {
                 c.emitOpCode(.op_temp_print, p.print.line);
             },
             .var_assign => @panic("todo"),
+            .block => |p| {
+                _ = p; // autofix
+                @panic("todo");
+            },
         }
     }
 

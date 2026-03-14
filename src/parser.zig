@@ -141,10 +141,35 @@ const Parser = struct {
                 return p.varDecl();
             }
             // p.reportError(.{ .error_msg = "idk man", .line = p.previous.line });
+        } else if (p.match(.left_brace)) {
+            return p.blockStmt();
         } else if (p.match(.kw_print)) {
             return p.printStmt();
         }
         return p.expressionStmt();
+    }
+
+    fn blockStmt(p: *Parser) Ast.Stmt {
+        const token = p.previous;
+        var stmts: std.ArrayList(Ast.Stmt) = .empty;
+
+        while (!p.check(.right_brace) and !p.isAtEnd()) {
+            const stmt = p.statement();
+            stmts.append(p.arena, stmt) catch oom();
+        }
+
+        p.consume(.right_brace, "Expect '}' after block statement");
+
+        return .{ .block = .{ .stmts = stmts.items, .token = token } };
+    }
+
+    fn expressionStmt(p: *Parser) Ast.Stmt {
+        const expr = p.expression(.lowest);
+        p.consumeSemicolon();
+
+        return .{
+            .expression = .{ .expr = expr },
+        };
     }
 
     fn printStmt(p: *Parser) Ast.Stmt {
@@ -156,15 +181,6 @@ const Parser = struct {
         p.consumeSemicolon();
 
         return .{ .print = .{ .print = print, .expr = expr } };
-    }
-
-    fn expressionStmt(p: *Parser) Ast.Stmt {
-        const expr = p.expression(.lowest);
-        p.consumeSemicolon();
-
-        return .{
-            .expression = .{ .expr = expr },
-        };
     }
 
     fn varDecl(p: *Parser) Ast.Stmt {
@@ -311,6 +327,10 @@ const Parser = struct {
         p.previous = p.current;
         p.current = p.next;
         p.next = p.tokens[p.current_index];
+    }
+
+    fn isAtEnd(p: *Parser) bool {
+        return p.check(.eof);
     }
 
     fn consume(p: *Parser, expected: Token.Type, msg: []const u8) void {
@@ -821,6 +841,57 @@ test "full variable declarations" {
         .{
             .source = "x: string = \"Hello, \" + \"World\";",
             .expected = "x: string = (\"Hello, \" + \"World\");",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer dbg("test case", t);
+
+        const parsed = try testParseStmts(gpa, t.source);
+        defer gpa.free(parsed);
+        try testing.expectEqualStrings(t.expected, parsed);
+    }
+}
+
+test "block statements" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "{}",
+            .expected =
+            \\{
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 1;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    x := 1;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    2 + 1;
+            \\    x := 1;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    (2 + 1);
+            \\    x := 1;
+            \\}
+            ,
         },
     };
 

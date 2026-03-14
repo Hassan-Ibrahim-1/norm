@@ -194,6 +194,14 @@ const Sema = struct {
                 const nir_expr = s.expression(p.expr);
                 return .{ .print = .{ .print = p.print, .expr = nir_expr } };
             },
+            .block => |block| {
+                var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
+                for (block.stmts) |b_stmt| {
+                    const nir_stmt = s.statement(b_stmt);
+                    nir_stmts.append(s.arena, nir_stmt) catch oom();
+                }
+                return .{ .block = .{ .token = block.token, .stmts = nir_stmts.items } };
+            },
             .var_assign => @panic("todo"),
         }
     }
@@ -1015,6 +1023,56 @@ test "variable declaration - type inference" {
         .{
             .source = "x := 10 + 2; y := x * 3;",
             .expected = "x: int = (10 + 2):int;\ny: int = (x:int * 3):int;",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "block statements" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "{}",
+            .expected =
+            \\{
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    2 + 1;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    (2 + 1):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    2 + 1;
+            \\    2 * 1;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    (2 + 1):int;
+            \\    (2 * 1):int;
+            \\}
+            ,
         },
     };
 

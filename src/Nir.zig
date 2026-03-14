@@ -175,6 +175,19 @@ pub const Stmt = union(enum) {
         }
     };
 
+    pub const Block = struct {
+        token: Token, // {
+        stmts: []Stmt,
+
+        pub fn format(b: *const Stmt.Block, w: *Io.Writer) Io.Writer.Error!void {
+            try w.writeAll("{\n");
+            for (b.stmts) |stmt| {
+                try w.print("    {f}\n", .{stmt});
+            }
+            try w.writeAll("}");
+        }
+    };
+
     pub const Print = struct {
         print: Token,
         expr: *Expr,
@@ -187,9 +200,10 @@ pub const Stmt = union(enum) {
     pub const invalid: Stmt = undefined;
 
     expression: Expression,
-    print: Print,
     var_decl: VarDecl,
     var_assign: VarAssign,
+    block: Block,
+    print: Print,
 
     pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {
         switch (stmt) {
