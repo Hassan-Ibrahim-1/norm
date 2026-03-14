@@ -68,13 +68,17 @@ pub const SymbolTable = struct {
         st.* = undefined;
     }
 
-    pub fn registerGlobal(st: *SymbolTable, name: []const u8, ty: NormType) void {
+    /// returns true if the symbol already exists
+    pub fn registerGlobal(st: *SymbolTable, name: []const u8, ty: NormType) bool {
         const sym: Symbol = .{ .type = ty, .scope = st.top_scope };
-        st.registerSym(name, sym);
+        return st.registerSym(name, sym);
     }
 
-    fn registerSym(st: *SymbolTable, name: []const u8, sym: Symbol) void {
-        st.top.put(st.gpa, name, sym) catch oom();
+    /// returns true if the symbol already exists
+    fn registerSym(st: *SymbolTable, name: []const u8, sym: Symbol) bool {
+        const gop = st.top.getOrPut(st.gpa, name) catch oom();
+        if (!gop.found_existing) gop.value_ptr.* = sym;
+        return gop.found_existing;
     }
 
     fn newScope(st: *SymbolTable, scope_level: Scope.Level, parent: *Scope) *Scope {

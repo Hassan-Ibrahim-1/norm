@@ -152,7 +152,14 @@ const Sema = struct {
                             s.analyzeTypeExpr(type_expr)
                         else
                             .n_invalid;
-                    s.sym_table.registerGlobal(vd.ident.lexeme, var_type);
+                    const already_exists = s.sym_table.registerGlobal(vd.ident.lexeme, var_type);
+                    if (already_exists) {
+                        s.reportErrorLine(
+                            vd.ident.line,
+                            "Variable {s} is already defined",
+                            .{vd.ident.lexeme},
+                        );
+                    }
                 },
                 else => {},
             }
@@ -1032,6 +1039,29 @@ test "variable declaration - type inference" {
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "variable declaration - already defined" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{
+            .source = "x := 10; x := true",
+            .error_msg = "Variable x is already defined",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
     }
 }
 
