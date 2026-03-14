@@ -28,7 +28,6 @@ pub const Scope = struct {
 pub const Symbol = struct {
     type: NormType,
     scope: *Scope,
-    resolved: bool = false,
 };
 
 pub const SymbolTable = struct {
@@ -163,7 +162,6 @@ pub const Stmt = union(enum) {
         value: *Expr,
 
         pub fn format(vd: *const Stmt.VarDecl, w: *Io.Writer) Io.Writer.Error!void {
-            debug.dbg();
             try w.print("{s}: {f} = {f};", .{ vd.ident.lexeme, vd.type, vd.value });
         }
     };

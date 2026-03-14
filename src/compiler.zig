@@ -251,7 +251,7 @@ pub const Compiler = struct {
             .var_decl => |vd| {
                 const sym = c.sym_table.find(vd.ident.lexeme);
                 if (sym.scope.level == .top) {
-                    c.globalDecl(vd, sym);
+                    c.globalDecl(vd);
                 }
             },
             .print => |p| {
@@ -262,40 +262,18 @@ pub const Compiler = struct {
         }
     }
 
-    fn globalDecl(c: *Compiler, vd: Nir.Stmt.VarDecl, sym: *Nir.Symbol) void {
-        if (sym.resolved) return;
-
+    fn globalDecl(c: *Compiler, vd: Nir.Stmt.VarDecl) void {
         c.expression(vd.value);
 
         const location = c.global_locations.items.len;
         c.global_locations.append(c.scratch, vd.ident.lexeme) catch oom();
 
         c.emitStore(@intCast(location), vd.ident.line);
-
-        sym.resolved = true;
     }
 
     fn globalIdent(c: *Compiler, ident: Token) void {
-        const sym = c.sym_table.find(ident.lexeme);
-        if (!sym.resolved) {
-            c.resolveGlobalIdent(ident);
-        }
         const location = c.resolveGlobalIdentLoc(ident);
         c.emitLoad(location, ident.line);
-    }
-
-    fn resolveGlobalIdent(c: *Compiler, ident: Token) void {
-        for (c.stmts[c.current_stmt + 1 ..]) |stmt| {
-            if (stmt != .var_decl) continue;
-
-            const vd = stmt.var_decl;
-            if (!mem.eql(u8, vd.ident.lexeme, ident.lexeme)) continue;
-
-            const sym = c.sym_table.find(vd.ident.lexeme);
-            c.globalDecl(vd, sym);
-
-            unreachable;
-        }
     }
 
     fn resolveGlobalIdentLoc(c: *Compiler, ident: Token) u16 {
