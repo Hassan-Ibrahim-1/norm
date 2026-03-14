@@ -214,7 +214,6 @@ pub const Compiler = struct {
     compiling_chunk: *Chunk,
     sym_table: *Nir.SymbolTable,
     stmts: []Nir.Stmt,
-    current_stmt: usize,
     global_locations: std.ArrayList([]const u8),
 
     fn init(gpa: Allocator, scratch: Allocator, nir: *Nir, chunk: *Chunk) Compiler {
@@ -224,7 +223,6 @@ pub const Compiler = struct {
             .compiling_chunk = chunk,
             .sym_table = &nir.sym_table,
             .stmts = nir.stmts,
-            .current_stmt = 0,
             .global_locations = .empty,
         };
     }
@@ -234,8 +232,7 @@ pub const Compiler = struct {
     }
 
     fn compile(c: *Compiler) void {
-        for (c.stmts, 0..) |stmt, i| {
-            c.current_stmt = i;
+        for (c.stmts) |stmt| {
             c.statement(stmt);
         }
     }

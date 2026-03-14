@@ -96,10 +96,8 @@ How will structs and enums fit into this?
 
 _Runtime_
 
-op_store (stack_slot) (Value)
+op_store (stack_slot)
 op_load  (stack_slot)
-
-figure out how to order global variables to initialize them properly
 
 #### Language demo project
 
