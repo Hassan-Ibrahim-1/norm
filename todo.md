@@ -24,7 +24,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] string interning for comparisons? look at go for inspiration
 - [x] global constant string table
 - [x] consider adding making specific instructions for each type. right now op_add et al have to deal
-- [ ] variable declartions + statements + scopes
+- [x] variable declartions + statements + scopes
 - [ ] variable mutability + assignment
 - [ ] my allocations in sema are absolutely stupid. take for example returning errors as an owned slice
 - [ ] sync points at statement boundaries for parser and sema
