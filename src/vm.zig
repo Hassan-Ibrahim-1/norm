@@ -436,6 +436,42 @@ fn testRunNoFree(
     return .{ .value = try vm.interpret(&chunk), .chunk = chunk };
 }
 
+fn testRunPrint(gpa: Allocator, source: []const u8) ![]const u8 {
+    var l = Lexer.init(source);
+    var tokens = l.scanTokens(gpa);
+    defer tokens.deinit(gpa);
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.LexerError;
+    }
+
+    var ast = parser.parse(gpa, tokens.tokens, true);
+    defer ast.arena.deinit();
+    if (ast.errors.len > 0) {
+        dbg("ast.errors", ast.errors);
+        return error.ParserError;
+    }
+
+    var nir = sema.analyze(gpa, &ast);
+    defer nir.deinit();
+    if (nir.errors.len > 0) {
+        debug.reportErrors(nir.errors, "test_runner", source);
+        return error.SemaFailed;
+    }
+
+    var chunk = compiler.compile(gpa, &nir);
+    defer chunk.deinit();
+
+    var test_out: Io.Writer.Allocating = .init(gpa);
+
+    var vm = Vm.init(gpa, &test_out.writer, &test_out.writer);
+    defer vm.deinit();
+
+    _ = try vm.interpret(&chunk);
+
+    return test_out.toOwnedSlice() catch oom();
+}
+
 test "literals" {
     const gpa = testing.allocator;
     var discarding: Io.Writer.Discarding = .init(&.{});
@@ -683,5 +719,220 @@ test "global variables - simple store and load" {
         var result = try testRunNoFree(gpa, t.source, w, w);
         defer result.chunk.deinit();
         try testing.expectEqualDeep(t.expected, result.value);
+    }
+}
+
+test "local variables + scopes" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{
+        .{
+            .source = "{ y := 5; print(y); }",
+            .expected = .{ .integer = 5 },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 1;
+            \\    {
+            \\        b := a + 1;
+            \\        print(b);
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 1;
+            \\    {
+            \\        b := a + 1;
+            \\        {
+            \\            c := b + a;
+            \\            print(c);
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\{ a := 1; }
+            \\{ b := 2; print(b); }
+            ,
+            .expected = .{ .integer = 2 },
+        },
+        .{
+            .source =
+            \\{ x := 1; }
+            \\{ x := 2; }
+            \\{ x := 3; print(x); }
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\x := 10;
+            \\{ y := x + 5; print(y); }
+            ,
+            .expected = .{ .integer = 15 },
+        },
+        .{
+            .source =
+            \\{ y := z + 1; print(y); }
+            \\z := 5;
+            ,
+            .expected = .{ .integer = 6 },
+        },
+        .{
+            .source =
+            \\a := 10;
+            \\b := 20;
+            \\c := 30;
+            \\{ result := a + b + c; print(result); }
+            ,
+            .expected = .{ .integer = 60 },
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\y := 100;
+            \\{ z := y + x; print(z); }
+            ,
+            .expected = .{ .integer = 101 },
+        },
+        .{
+            .source =
+            \\global := 5;
+            \\{
+            \\    a := global;
+            \\    {
+            \\        b := a * 2;
+            \\        {
+            \\            c := b + global;
+            \\            print(c);
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 15 },
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 10;
+            \\    y := x * 2;
+            \\    z := y + x;
+            \\    print(z);
+            \\}
+            ,
+            .expected = .{ .integer = 30 },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 2;
+            \\    {
+            \\        b := 3;
+            \\        {
+            \\            c := a * b;
+            \\            print(c);
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 6 },
+        },
+        .{
+            .source = "x := 10; { y := x + 1 < 3 == z; print(!y); } z := false;",
+            .expected = .{ .boolean = false },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := true;
+            \\    b := false;
+            \\    print(a and b);
+            \\}
+            ,
+            .expected = .{ .boolean = false },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := true;
+            \\    b := false;
+            \\    print(a or b);
+            \\}
+            ,
+            .expected = .{ .boolean = true },
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 1 > 2;
+            \\    print(!x);
+            \\}
+            ,
+            .expected = .{ .boolean = true },
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\{
+            \\    y := x + 1;
+            \\    {
+            \\        z := y + 1;
+            \\        {
+            \\            w := z + 1;
+            \\            print(w);
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 4 },
+        },
+        .{
+            .source =
+            \\{ a := 1.5; print(a); }
+            ,
+            .expected = .{ .float = 1.5 },
+        },
+        .{
+            .source =
+            \\x := 2.0;
+            \\{ y := x * 3.0; print(y); }
+            ,
+            .expected = .{ .float = 6.0 },
+        },
+        .{
+            .source =
+            \\{
+            \\    s := "hello";
+            \\    t := "world";
+            \\    print(s + " " + t);
+            \\}
+            ,
+            .expected = .{ .string = .ref("hello world") },
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const result = try testRunPrint(gpa, t.source);
+        defer gpa.free(result);
+
+        var temp_writer: Io.Writer.Allocating = .init(gpa);
+        defer temp_writer.deinit();
+
+        try temp_writer.writer.print("{f}\n", .{t.expected});
+        const expected_str = temp_writer.written();
+
+        try testing.expectEqualStrings(expected_str, result);
     }
 }
