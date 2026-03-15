@@ -533,11 +533,8 @@ const dbg = @import("debug.zig").dbg;
 
 fn testAnalyzeExpr(gpa: Allocator, source: []const u8) ![]const u8 {
     var l = Lexer.init(source);
-    const tokens = l.scanTokens(gpa);
-    defer {
-        gpa.free(tokens.tokens);
-        gpa.free(tokens.errors);
-    }
+    var tokens = l.scanTokens(gpa);
+    defer tokens.deinit(gpa);
     if (tokens.errors.len > 0) {
         dbg("tokens.errors", tokens.errors);
         return error.LexerError;
@@ -564,11 +561,8 @@ fn testAnalyzeExpr(gpa: Allocator, source: []const u8) ![]const u8 {
 
 fn testAnalyzeExprFailure(gpa: Allocator, source: []const u8) !Nir {
     var l = Lexer.init(source);
-    const tokens = l.scanTokens(gpa);
-    defer {
-        gpa.free(tokens.tokens);
-        gpa.free(tokens.errors);
-    }
+    var tokens = l.scanTokens(gpa);
+    defer tokens.deinit(gpa);
     if (tokens.errors.len > 0) {
         dbg("tokens.errors", tokens.errors);
         return error.LexerError;
@@ -592,11 +586,8 @@ fn testAnalyzeExprFailure(gpa: Allocator, source: []const u8) !Nir {
 
 fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
     var l = Lexer.init(source);
-    const tokens = l.scanTokens(gpa);
-    defer {
-        gpa.free(tokens.tokens);
-        gpa.free(tokens.errors);
-    }
+    var tokens = l.scanTokens(gpa);
+    defer tokens.deinit(gpa);
     if (tokens.errors.len > 0) {
         dbg("tokens.errors", tokens.errors);
         return error.LexerError;
@@ -621,11 +612,8 @@ fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
 
 fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
     var l = Lexer.init(source);
-    const tokens = l.scanTokens(gpa);
-    defer {
-        gpa.free(tokens.tokens);
-        gpa.free(tokens.errors);
-    }
+    var tokens = l.scanTokens(gpa);
+    defer tokens.deinit(gpa);
     if (tokens.errors.len > 0) {
         dbg("tokens.errors", tokens.errors);
         return error.LexerError;

@@ -451,11 +451,8 @@ fn oom() noreturn {
 
 fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
     var l = Lexer.init(source);
-    const tokens = l.scanTokens(gpa);
-    defer {
-        gpa.free(tokens.tokens);
-        gpa.free(tokens.errors);
-    }
+    var tokens = l.scanTokens(gpa);
+    defer tokens.deinit(gpa);
     if (tokens.errors.len > 0) {
         dbg("tokens.errors", tokens.errors);
         return error.LexerError;
@@ -482,11 +479,8 @@ fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
 
 fn testParseStmts(gpa: Allocator, source: []const u8) ![]const u8 {
     var l = Lexer.init(source);
-    const tokens = l.scanTokens(gpa);
-    defer {
-        gpa.free(tokens.tokens);
-        gpa.free(tokens.errors);
-    }
+    var tokens = l.scanTokens(gpa);
+    defer tokens.deinit(gpa);
     if (tokens.errors.len > 0) {
         dbg("tokens.errors", tokens.errors);
         return error.LexerError;

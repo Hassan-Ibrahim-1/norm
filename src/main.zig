@@ -53,11 +53,8 @@ fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Wri
     defer gpa.free(source);
 
     var lexer = Lexer.init(source);
-    const tokens = lexer.scanTokens(gpa);
-    defer {
-        gpa.free(tokens.tokens);
-        gpa.free(tokens.errors);
-    }
+    var tokens = lexer.scanTokens(gpa);
+    defer tokens.deinit(gpa);
 
     if (tokens.errors.len > 0) {
         for (tokens.errors) |diag| {

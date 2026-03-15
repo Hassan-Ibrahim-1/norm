@@ -365,11 +365,8 @@ fn testRun(
     stderr: *Io.Writer,
 ) !Value {
     var l = Lexer.init(source);
-    const tokens = l.scanTokens(gpa);
-    defer {
-        gpa.free(tokens.tokens);
-        gpa.free(tokens.errors);
-    }
+    var tokens = l.scanTokens(gpa);
+    defer tokens.deinit(gpa);
     if (tokens.errors.len > 0) {
         dbg("tokens.errors", tokens.errors);
         return error.LexerError;
@@ -410,11 +407,8 @@ fn testRunNoFree(
     stderr: *Io.Writer,
 ) !NoFreeResult {
     var l = Lexer.init(source);
-    const tokens = l.scanTokens(gpa);
-    defer {
-        gpa.free(tokens.tokens);
-        gpa.free(tokens.errors);
-    }
+    var tokens = l.scanTokens(gpa);
+    defer tokens.deinit(gpa);
     if (tokens.errors.len > 0) {
         dbg("tokens.errors", tokens.errors);
         return error.LexerError;
