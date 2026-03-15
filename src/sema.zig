@@ -225,7 +225,32 @@ const Sema = struct {
                     .scope = block_scope,
                 } };
             },
-            .if_stmt, .var_assign => @panic("todo"),
+            .if_stmt => |if_stmt| {
+                const if_condition = s.expression(if_stmt.condition);
+                const if_then_block = s.statement(.{ .block = if_stmt.then_block }).block;
+
+                const else_if_blocks =
+                    s.arena.alloc(Nir.Stmt.If.ElseIf, if_stmt.else_if_blocks.len) catch oom();
+                for (if_stmt.else_if_blocks, 0..) |else_if, i| {
+                    else_if_blocks[i].condition = s.expression(else_if.condition);
+                    else_if_blocks[i].then_block =
+                        s.statement(.{ .block = else_if.then_block }).block;
+                }
+
+                const else_block =
+                    if (if_stmt.else_block) |eb| s.statement(.{ .block = eb }).block else null;
+
+                return .{
+                    .if_stmt = .{
+                        .token = if_stmt.token,
+                        .condition = if_condition,
+                        .then_block = if_then_block,
+                        .else_if_blocks = else_if_blocks,
+                        .else_block = else_block,
+                    },
+                };
+            },
+            .var_assign => @panic("todo"),
         }
     }
 
@@ -1497,6 +1522,113 @@ test "scoping errors - undefined and redefined variables" {
 
         try testing.expect(nir.errors.len == 1);
         try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
+    }
+}
+
+test "if statements" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "if true {}",
+            .expected = "if true {\n}",
+        },
+        .{
+            .source = "if false { x := 1; }",
+            .expected = "if false {\n    x: int = 1;\n}",
+        },
+        .{
+            .source = "if true { x := 1; }",
+            .expected = "if true {\n    x: int = 1;\n}",
+        },
+        .{
+            .source = "if true { x := 1; } else { x := 2; }",
+            .expected = "if true {\n    x: int = 1;\n} else {\n    x: int = 2;\n}",
+        },
+        .{
+            .source = "if false { x := 1; } else { x := 2; }",
+            .expected = "if false {\n    x: int = 1;\n} else {\n    x: int = 2;\n}",
+        },
+        .{
+            .source = "if false { x := 1; } else if true { x := 2; }",
+            .expected = "if false {\n    x: int = 1;\n} else if true {\n    x: int = 2;\n}",
+        },
+        .{
+            .source = "if false { x := 1; } else if true { x := 2; } else { x := 3; }",
+            .expected = "if false {\n    x: int = 1;\n} else if true {\n    x: int = 2;\n} else {\n    x: int = 3;\n}",
+        },
+        .{
+            .source = "if false { x := 1; } else if 1 > 2 { x := 2; } else if 3 > 4 { x := 3; } else { x := 4; }",
+            .expected = "if false {\n    x: int = 1;\n} else if (1 > 2):bool {\n    x: int = 2;\n} else if (3 > 4):bool {\n    x: int = 3;\n} else {\n    x: int = 4;\n}",
+        },
+        .{
+            .source = "x := true; if x { y := 1; }",
+            .expected = "x: bool = true;\nif x:bool {\n    y: int = 1;\n}",
+        },
+        .{
+            .source = "x := 1; if x > 0 { y := 1; }",
+            .expected = "x: int = 1;\nif (x:int > 0):bool {\n    y: int = 1;\n}",
+        },
+        .{
+            .source = "if true and false { x := 1; }",
+            .expected = "if (true and false):bool {\n    x: int = 1;\n}",
+        },
+        .{
+            .source = "if true or false { x := 1; }",
+            .expected = "if (true or false):bool {\n    x: int = 1;\n}",
+        },
+        .{
+            .source = "if !false { x := 1; }",
+            .expected = "if (!false):bool {\n    x: int = 1;\n}",
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\y := 2;
+            \\if x > 0 {
+            \\    if y > 0 {
+            \\        z := 1;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\x: int = 1;
+            \\y: int = 2;
+            \\if (x:int > 0):bool {
+            \\    if (y:int > 0):bool {
+            \\    z: int = 1;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\if x > 0 {
+            \\    y := 2;
+            \\} else {
+            \\    y := 3;
+            \\}
+            ,
+            .expected =
+            \\x: int = 1;
+            \\if (x:int > 0):bool {
+            \\    y: int = 2;
+            \\} else {
+            \\    y: int = 3;
+            \\}
+            ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
     }
 }
 

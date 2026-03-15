@@ -260,7 +260,6 @@ pub const Compiler = struct {
                 c.expression(p.expr);
                 c.emitOpCode(.op_temp_print, p.print.line);
             },
-            .var_assign => @panic("todo"),
             .block => |block| {
                 c.beginScope(block.scope);
                 defer c.endScope();
@@ -268,6 +267,8 @@ pub const Compiler = struct {
                     c.statement(block_stmt);
                 }
             },
+            .var_assign => @panic("todo"),
+            .if_stmt => @panic("todo"),
         }
     }
 
