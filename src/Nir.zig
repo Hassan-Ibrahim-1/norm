@@ -29,6 +29,7 @@ pub const Scope = struct {
 pub const Symbol = struct {
     type: NormType,
     scope: *Scope,
+    stack_slot: usize,
 };
 
 pub const SymbolTable = struct {
@@ -38,6 +39,8 @@ pub const SymbolTable = struct {
     locals: std.AutoHashMapUnmanaged(*Scope, Locals),
     top_scope: *Scope,
     current_scope: *Scope,
+
+    local_count: usize,
 
     pub const SymMap = std.StringHashMapUnmanaged(Symbol);
 
@@ -60,6 +63,7 @@ pub const SymbolTable = struct {
             .current_scope = top_scope,
             .top = .empty,
             .locals = .empty,
+            .local_count = 0,
         };
     }
 
@@ -72,20 +76,35 @@ pub const SymbolTable = struct {
     pub fn register(st: *SymbolTable, name: []const u8, ty: NormType) bool {
         if (st.symDefined(name, st.current_scope)) return true;
 
-        const sym: Symbol = .{ .type = ty, .scope = st.current_scope };
-        st.registerSym(name, sym);
+        st.registerSym(name, ty);
 
         return false;
     }
 
-    fn registerSym(st: *SymbolTable, name: []const u8, sym: Symbol) void {
+    fn registerSym(st: *SymbolTable, name: []const u8, ty: NormType) void {
         switch (st.current_scope.level) {
             .top => {
+                const stack_slot = st.top.count();
+                const sym: Symbol = .{
+                    .type = ty,
+                    .scope = st.top_scope,
+                    .stack_slot = stack_slot,
+                };
+
                 st.top.put(st.arena.allocator(), name, sym) catch oom();
             },
             .local => {
+                const stack_slot = st.local_count + st.top.count();
+                const sym: Symbol = .{
+                    .type = ty,
+                    .scope = st.current_scope,
+                    .stack_slot = stack_slot,
+                };
+
                 const locals = st.locals.getPtr(st.current_scope).?;
                 locals.locals.put(st.arena.allocator(), name, sym) catch oom();
+
+                st.local_count += 1;
             },
         }
     }
@@ -111,6 +130,8 @@ pub const SymbolTable = struct {
 
     pub fn endScope(st: *SymbolTable) void {
         assert(st.current_scope.level != .top);
+        const locals = st.locals.get(st.current_scope).?;
+        st.local_count -= locals.locals.count();
         st.current_scope = st.current_scope.parent;
     }
 

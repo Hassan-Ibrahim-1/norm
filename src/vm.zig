@@ -275,6 +275,11 @@ pub const Vm = struct {
                     _ = vm.pop();
                 },
 
+                .op_pop_n => {
+                    const n = vm.readShort();
+                    vm.popN(n);
+                },
+
                 .op_return => {
                     return vm.pop();
                 },
@@ -327,6 +332,10 @@ pub const Vm = struct {
     fn pop(vm: *Vm) Value {
         vm.stack_top -= 1;
         return vm.stack_top[0];
+    }
+
+    fn popN(vm: *Vm, n: u16) void {
+        vm.stack_top -= n;
     }
 
     fn stringConcat(vm: *Vm, a: Value.String, b: Value.String) Value {
@@ -682,4 +691,3 @@ test "variables - simple store and load" {
         try testing.expectEqualDeep(t.expected, result.value);
     }
 }
-

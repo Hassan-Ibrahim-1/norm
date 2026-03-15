@@ -1,0 +1,8 @@
+sed -i '/defer[[:space:]]*{/{
+N
+/^\(.*\)\n[[:space:]]*gpa\./{
+N
+N
+s/.*\n.*\n.*\n.*/tokens.deinit(gpa);/
+}
+}' src/parser.zig

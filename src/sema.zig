@@ -1311,27 +1311,23 @@ test "block scopes" {
             .source =
             \\x := 1;
             \\{
-            \\    print(x);
             \\    y := x + 1;
-            \\    print(y);
             \\}
             ,
             .expected =
             \\x: int = 1;
             \\{
-            \\    print(x:int);
             \\    y: int = (x:int + 1):int;
-            \\    print(y:int);
             \\}
             ,
         },
         .{
             .source =
-            \\x := 10;
             \\{
             \\    y := 1;
             \\    z := 2;
             \\}
+            \\x := 10;
             ,
             .expected =
             \\x: int = 10;

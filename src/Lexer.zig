@@ -192,6 +192,12 @@ pub const Diagnostics = struct {
 pub const Tokens = struct {
     tokens: []Token,
     errors: []Diagnostics,
+
+    pub fn deinit(t: *Tokens, gpa: Allocator) void {
+        gpa.free(t.tokens);
+        gpa.free(t.errors);
+        t.* = undefined;
+    }
 };
 
 pub fn scanTokens(l: *Lexer, gpa: Allocator) Tokens {

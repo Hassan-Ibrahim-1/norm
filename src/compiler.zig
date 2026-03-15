@@ -4,6 +4,7 @@ const Allocator = mem.Allocator;
 const testing = std.testing;
 const Io = std.Io;
 const builtin = @import("builtin");
+const assert = std.debug.assert;
 
 const debug = @import("debug.zig");
 const dbg = debug.dbg;
@@ -119,6 +120,11 @@ pub const OpCode = enum(u8) {
     // VM: Pop a value off the stack and discard it
     op_pop,
 
+    // op_pop_n <n: u16>
+    //
+    // VM: Pop n values off the stack and discard then
+    op_pop_n,
+
     // Temporary: Signals end of execution
     op_return,
 
@@ -214,28 +220,22 @@ pub const Compiler = struct {
     compiling_chunk: *Chunk,
     sym_table: *Nir.SymbolTable,
     stmts: []Nir.Stmt,
-    global_locations: std.ArrayList([]const u8),
 
     current_scope: *Nir.Scope,
-    current_scope_sym_count: usize,
-    scope_depth: usize,
 
     fn init(gpa: Allocator, scratch: Allocator, nir: *Nir, chunk: *Chunk) Compiler {
         return .{
             .gpa = gpa,
             .scratch = scratch,
             .current_scope = nir.sym_table.top_scope,
-            .current_scope_sym_count = 0,
-            .scope_depth = 0,
             .compiling_chunk = chunk,
             .sym_table = &nir.sym_table,
             .stmts = nir.stmts,
-            .global_locations = .empty,
         };
     }
 
     fn deinit(c: *Compiler) void {
-        c.global_locations.deinit(c.scratch);
+        c.* = undefined;
     }
 
     fn compile(c: *Compiler) void {
@@ -254,9 +254,7 @@ pub const Compiler = struct {
             },
             .var_decl => |vd| {
                 const sym = c.findSym(vd.ident.lexeme);
-                if (sym.scope.level == .top) {
-                    c.globalDecl(vd);
-                }
+                c.decl(vd, @intCast(sym.stack_slot));
             },
             .print => |p| {
                 c.expression(p.expr);
@@ -264,8 +262,8 @@ pub const Compiler = struct {
             },
             .var_assign => @panic("todo"),
             .block => |block| {
-                c.current_scope = block.scope;
-                defer c.current_scope = c.current_scope.parent;
+                c.beginScope(block.scope);
+                defer c.endScope();
                 for (block.stmts) |block_stmt| {
                     c.statement(block_stmt);
                 }
@@ -277,50 +275,34 @@ pub const Compiler = struct {
         return c.sym_table.find(name, c.current_scope);
     }
 
-    fn globalDecl(c: *Compiler, vd: Nir.Stmt.VarDecl) void {
-        c.expression(vd.value);
-
-        const location = c.global_locations.items.len;
-        c.global_locations.append(c.scratch, vd.ident.lexeme) catch oom();
-
-        c.emitStore(@intCast(location), vd.ident.line);
+    fn beginScope(c: *Compiler, scope: *Nir.Scope) void {
+        c.current_scope = scope;
     }
 
-    fn localDecl(c: *Compiler, vd: Nir.Stmt.VarDecl) void {
-        c.expression(vd.value);
+    fn endScope(c: *Compiler) void {
+        defer c.current_scope = c.current_scope.parent;
+        const locals = c.sym_table.locals.get(c.current_scope).?;
+        const local_count = locals.locals.count();
 
-        const location = c.global_locations.items.len;
-        c.global_locations.append(c.scratch, vd.ident.lexeme) catch oom();
-
-        c.emitStore(@intCast(location), vd.ident.line);
-    }
-
-    fn globalIdent(c: *Compiler, ident: Token) void {
-        const location = c.resolveGlobalIdentLoc(ident);
-        c.emitLoad(location, ident.line);
-    }
-
-    fn resolveLocalIdentLoc(c: *Compiler, ident: Token) u16 {
-        for (c.global_locations.items, 0..) |global_ident, i| {
-            if (mem.eql(u8, global_ident, ident.lexeme)) {
-                return @intCast(i);
-            }
+        switch (local_count) {
+            0 => {},
+            1 => c.emitOpCode(.op_pop, 0),
+            else => {
+                c.emitOpCode(.op_pop_n, 0);
+                c.emitShort(@intCast(local_count), 0);
+            },
         }
-        unreachable;
     }
 
-    fn resolveGlobalIdentLoc(c: *Compiler, ident: Token) u16 {
-        for (c.global_locations.items, 0..) |global_ident, i| {
-            if (mem.eql(u8, global_ident, ident.lexeme)) {
-                return @intCast(i);
-            }
-        }
-        unreachable;
+    fn decl(c: *Compiler, vd: Nir.Stmt.VarDecl, stack_slot: u16) void {
+        c.expression(vd.value);
+        c.emitStore(stack_slot, vd.ident.line);
     }
 
     fn identifier(c: *Compiler, i: *Nir.Expr.Identifier) void {
-        // TODO: proper scopes
-        c.globalIdent(i.ident);
+        const sym = c.sym_table.find(i.ident.lexeme, c.current_scope);
+        const stack_slot: u16 = @intCast(sym.stack_slot);
+        c.emitLoad(stack_slot, i.ident.line);
     }
 
     fn expression(c: *Compiler, expr: *Nir.Expr) void {
@@ -433,20 +415,25 @@ pub const Compiler = struct {
     }
 
     fn literal(c: *Compiler, l: *Nir.Expr.Literal) void {
+        const line = l.token.line;
         switch (l.value) {
-            .float => |f| c.compiling_chunk.writeConstant(.{ .float = f }, l.token.line),
-            .integer => |i| c.compiling_chunk.writeConstant(.{ .integer = i }, l.token.line),
+            .float => |f| c.emitConstant(.{ .float = f }, line),
+            .integer => |i| c.emitConstant(.{ .integer = i }, line),
             .boolean => |b| if (b)
-                c.emitOpCode(.op_true, l.token.line)
+                c.emitOpCode(.op_true, line)
             else
-                c.emitOpCode(.op_false, l.token.line),
-            .string => |s| c.compiling_chunk.writeString(s, l.token.line),
-            .nil => c.emitOpCode(.op_nil, l.token.line),
+                c.emitOpCode(.op_false, line),
+            .string => |s| c.emitString(s, line),
+            .nil => c.emitOpCode(.op_nil, line),
         }
     }
 
     fn emitConstant(c: *Compiler, value: Value, line: u32) void {
         c.compiling_chunk.writeConstant(value, line);
+    }
+
+    fn emitString(c: *Compiler, s: []const u8, line: u32) void {
+        c.compiling_chunk.writeString(s, line);
     }
 
     fn emitOpCode(c: *Compiler, op: OpCode, line: u32) void {
@@ -458,14 +445,14 @@ pub const Compiler = struct {
         c.emitOpCode(op2, line);
     }
 
-    fn emitStore(c: *Compiler, location: u16, line: u32) void {
+    fn emitStore(c: *Compiler, stack_slot: u16, line: u32) void {
         c.emitOpCode(.op_store, line);
-        c.emitShort(location, line);
+        c.emitShort(stack_slot, line);
     }
 
-    fn emitLoad(c: *Compiler, location: u16, line: u32) void {
+    fn emitLoad(c: *Compiler, stack_slot: u16, line: u32) void {
         c.emitOpCode(.op_load, line);
-        c.emitShort(location, line);
+        c.emitShort(stack_slot, line);
     }
 
     fn emitByte(c: *Compiler, b: u8, line: u32) void {
@@ -906,6 +893,197 @@ test "global variables - op_load" {
             }),
             .expected_constants = &.{ .{ .string = .ref("Hello") }, .{ .string = .ref("World") } }
         }
+    };
+    // zig fmt: on
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "local variables and scopes - op_load, op_store and scope popping" {
+    @setEvalBranchQuota(20000);
+
+    const gpa = testing.allocator;
+    // zig fmt: off
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source =
+            \\x := 1;
+            \\{
+            \\    y := x + 2;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // x
+                .op_constant, 0,
+                .op_store, 0, 0,
+
+                // y
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_add_int,
+                .op_store, 1, 0,
+
+                .op_pop,
+
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\{
+            \\    y := x + 2;
+            \\}
+            \\z := false;
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // x
+                .op_constant, 0,
+                .op_store, 0, 0,
+
+                // z
+                .op_false,
+                .op_store, 1, 0,
+
+                // y
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_add_int,
+                .op_store, 2, 0,
+
+                .op_pop,
+
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 1;
+            \\    {
+            \\        b := a + 1;
+            \\        c := a + b;
+            \\    }
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // a
+                .op_constant, 0,
+                .op_store, 0, 0,
+
+                // b
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_add_int,
+                .op_store, 1, 0,
+
+                // c
+                .op_load, 0, 0,
+                .op_load, 1, 0,
+                .op_add_int,
+                .op_store, 2, 0,
+
+                .op_pop_n, 2, 0,
+                .op_pop,
+
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 1 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 1;
+            \\    {
+            \\        b := a + 1;
+            \\        c := a + b;
+            \\    }
+            \\    c := true;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // a
+                .op_constant, 0,
+                .op_store, 0, 0,
+
+                // b
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_add_int,
+                .op_store, 1, 0,
+
+                // c1
+                .op_load, 0, 0,
+                .op_load, 1, 0,
+                .op_add_int,
+                .op_store, 2, 0,
+
+                .op_pop_n, 2, 0,
+
+                // c2
+                .op_true,
+                .op_store, 1, 0,
+
+                .op_pop_n, 2, 0,
+
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 1 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 1;
+            \\    {
+            \\        b := a + 1;
+            \\        c := a + b;
+            \\    }
+            \\    c := true;
+            \\}
+            \\z := 0;
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // z
+                .op_constant, 0,
+                .op_store, 0, 0,
+
+                // a
+                .op_constant, 1,
+                .op_store, 1, 0,
+
+                // b
+                .op_load, 1, 0,
+                .op_constant, 2,
+                .op_add_int,
+                .op_store, 2, 0,
+
+                // c1
+                .op_load, 1, 0,
+                .op_load, 2, 0,
+                .op_add_int,
+                .op_store, 3, 0,
+
+                .op_pop_n, 2, 0,
+
+                // c2
+                .op_true,
+                .op_store, 2, 0,
+
+                .op_pop_n, 2, 0,
+
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 1 }, .{ .integer = 1 } },
+        },
     };
     // zig fmt: on
 

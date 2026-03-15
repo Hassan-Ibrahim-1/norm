@@ -58,6 +58,7 @@ fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Wri
         gpa.free(tokens.tokens);
         gpa.free(tokens.errors);
     }
+
     if (tokens.errors.len > 0) {
         for (tokens.errors) |diag| {
             try stderr.print("{s}\n", .{diag.error_msg});
@@ -100,17 +101,14 @@ fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.Fi
 
         const len = try stdin.read(&line_buf);
         if (len == 0) {
-            _ = try stdout.write("\n");
+            try stdout.writeAll("\n");
             break;
         }
         const line = line_buf[0..len];
 
         var lexer = Lexer.init(line);
-        const tokens = lexer.scanTokens(gpa);
-        defer {
-            gpa.free(tokens.tokens);
-            gpa.free(tokens.errors);
-        }
+        var tokens = lexer.scanTokens(gpa);
+        defer tokens.deinit(gpa);
         if (tokens.errors.len > 0) {
             for (tokens.errors) |diag| {
                 try stderr.print("{s}\n", .{diag.error_msg});
