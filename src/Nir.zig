@@ -412,7 +412,7 @@ pub const Expr = struct {
 
     pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
         if (expr.type == .n_invalid) {
-            @panic("invalid - an error was not reported");
+            @panic("found invalid type - an error was not reported");
         }
 
         try switch (expr.kind) {

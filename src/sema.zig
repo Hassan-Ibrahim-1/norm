@@ -405,6 +405,10 @@ const Sema = struct {
 
     fn identifier(s: *Sema, i: *Ast.Expr.Identifier) *Nir.Expr {
         const sym = s.sym_table.tryFind(i.ident.lexeme) orelse return s.undefinedVariable(i.ident);
+        if (sym.type == .n_invalid and sym.scope.level == .top) {
+            return s.useBeforeDefinition(i.ident);
+        }
+
         return makeIdentifier(s.arena, i.ident, sym.scope, sym.type);
     }
 
@@ -419,6 +423,15 @@ const Sema = struct {
             "Variable {s} is already defined",
             .{name.lexeme},
         );
+    }
+
+    fn useBeforeDefinition(s: *Sema, name: Token) *Nir.Expr {
+        s.reportErrorLine(
+            name.line,
+            "Variable {s} used before it's definition",
+            .{name.lexeme},
+        );
+        return s.invalid_expr;
     }
 
     fn literal(s: *Sema, l: *Ast.Expr.Literal) *Nir.Expr {
@@ -1132,6 +1145,29 @@ test "block statements" {
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "global declaration order error" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{
+            .source = "x := z; z := 1;",
+            .error_msg = "Variable z used before it's definition",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
     }
 }
 

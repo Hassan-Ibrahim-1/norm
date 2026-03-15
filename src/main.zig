@@ -77,6 +77,10 @@ fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Wri
         return;
     }
 
+    const stmts = debug.printStmts(gpa, nir.stmts);
+    defer gpa.free(stmts);
+    try stderr.print("{s}\n\n", .{stmts});
+
     var chunk = compiler.compile(gpa, &nir);
     defer chunk.deinit();
 

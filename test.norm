@@ -1,7 +1,7 @@
-x := 20;
-y := "Hey";
+{
+    y := x + 1 < 3 == z;
+    print(!y);
+}
 
-name := "test";
-
-print(x + 3);
-print(y + ", " + name);
+x := z;
+z := false;

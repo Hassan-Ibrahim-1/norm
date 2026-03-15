@@ -1,14 +1,5 @@
 ## Norm
 
-- [x] Lexer
-- [ ] Parser (astgen)
-- [ ] Error report system (do this early)
-- [ ] Semantic anaylsis + type checking
-- [ ] Codegen + optimization
-- [ ] Virtual machine + garbage collector
-
-Think about how a garbage collector fits here.
-
 ### Doing now
 
 - [x] Parse literals, arithmetic expressions
@@ -40,6 +31,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [ ] if statements
 - [ ] rewrite logical operators to have short circuit behavior
 - [ ] loops
+- [ ] Runtime errors in VM. Division by zero, index out of bounds, etc.
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
     * how do i handle user defined types? right now im just thinking of interning them

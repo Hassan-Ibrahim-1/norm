@@ -615,7 +615,7 @@ test "string comparisons" {
     }
 }
 
-test "variables - simple store and load" {
+test "global variables - simple store and load" {
     const gpa = testing.allocator;
     var discarding: Io.Writer.Discarding = .init(&.{});
     const w = &discarding.writer;
