@@ -25,10 +25,10 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] global constant string table
 - [x] consider adding making specific instructions for each type. right now op_add et al have to deal
 - [x] variable declartions + statements + scopes
+- [ ] if statements
 - [ ] variable mutability + assignment
 - [ ] my allocations in sema are absolutely stupid. take for example returning errors as an owned slice
 - [ ] sync points at statement boundaries for parser and sema
-- [ ] if statements
 - [ ] rewrite logical operators to have short circuit behavior
 - [ ] loops
 - [ ] Runtime errors in VM. Division by zero, index out of bounds, etc.

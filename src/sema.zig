@@ -225,7 +225,7 @@ const Sema = struct {
                     .scope = block_scope,
                 } };
             },
-            .var_assign => @panic("todo"),
+            .if_stmt, .var_assign => @panic("todo"),
         }
     }
 

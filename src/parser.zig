@@ -143,10 +143,48 @@ const Parser = struct {
             // p.reportError(.{ .error_msg = "idk man", .line = p.previous.line });
         } else if (p.match(.left_brace)) {
             return p.blockStmt();
+        } else if (p.match(.kw_if)) {
+            return p.ifStmt();
         } else if (p.match(.kw_print)) {
             return p.printStmt();
         }
         return p.expressionStmt();
+    }
+
+    fn ifStmt(p: *Parser) Ast.Stmt {
+        const if_token = p.previous;
+
+        const condition = p.expression(.lowest);
+        p.consume(.left_brace, "Expect '{' after if condition");
+        const then_block = p.blockStmt().block;
+
+        var else_if_blocks: std.ArrayList(Ast.Stmt.If.ElseIf) = .empty;
+        while (p.matchBoth(.kw_else, .kw_if) and !p.isAtEnd()) {
+            const else_if_condition = p.expression(.lowest);
+            p.consume(.left_brace, "Expect '{' after else if condition");
+            const else_if_then_block = p.blockStmt().block;
+
+            else_if_blocks.append(p.arena, .{
+                .condition = else_if_condition,
+                .then_block = else_if_then_block,
+            }) catch oom();
+        }
+
+        var else_block: ?Ast.Stmt.Block = null;
+        if (p.match(.kw_else)) {
+            p.consume(.left_brace, "Expect '{' after else");
+            else_block = p.blockStmt().block;
+        }
+
+        return .{
+            .if_stmt = .{
+                .token = if_token,
+                .condition = condition,
+                .then_block = then_block,
+                .else_if_blocks = else_if_blocks.items,
+                .else_block = else_block,
+            },
+        };
     }
 
     fn blockStmt(p: *Parser) Ast.Stmt {
@@ -366,6 +404,15 @@ const Parser = struct {
 
     fn matchEither(p: *Parser, a: Token.Type, b: Token.Type) bool {
         return p.match(a) or p.match(b);
+    }
+
+    fn matchBoth(p: *Parser, a: Token.Type, b: Token.Type) bool {
+        if (p.check(a) and p.checkNext(b)) {
+            p.advance();
+            p.advance();
+            return true;
+        }
+        return false;
     }
 
     fn reportError(p: *Parser, diag: Ast.Diagnostics) void {
@@ -911,6 +958,151 @@ test "temporary print stmt" {
         .{
             .source = "x := 10; print(x);",
             .expected = "x := 10;\nprint(x);",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testParseStmts(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "if statements" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "if true {}",
+            .expected = "if true {\n}",
+        },
+        .{
+            .source =
+            \\if false {
+            \\    x := 1;
+            \\} else {
+            \\    x := 2;
+            \\}
+            ,
+            .expected =
+            \\if false {
+            \\    x := 1;
+            \\} else {
+            \\    x := 2;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\if false {
+            \\    x := 1;
+            \\} else if 2 > 1{
+            \\    x := 2;
+            \\}
+            ,
+            .expected =
+            \\if false {
+            \\    x := 1;
+            \\} else if (2 > 1) {
+            \\    x := 2;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\if false {
+            \\    x := 1;
+            \\} else if 2 > 1{
+            \\    x := 2;
+            \\} else {
+            \\    print("nothing");
+            \\}
+            ,
+            .expected =
+            \\if false {
+            \\    x := 1;
+            \\} else if (2 > 1) {
+            \\    x := 2;
+            \\} else {
+            \\    print("nothing");
+            \\}
+            ,
+        },
+        .{
+            .source = "if 1 < 2 {}",
+            .expected = "if (1 < 2) {\n}",
+        },
+        .{
+            .source = "if x == y {}",
+            .expected = "if (x == y) {\n}",
+        },
+        .{
+            .source = "if true and false {}",
+            .expected = "if (true and false) {\n}",
+        },
+        .{
+            .source = "if true or false {}",
+            .expected = "if (true or false) {\n}",
+        },
+        .{
+            .source =
+            \\if x > 0 {
+            \\    if y > 0 {
+            \\        x := 1;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\if (x > 0) {
+            \\    if (y > 0) {
+            \\    x := 1;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\if false {
+            \\    x := 1;
+            \\} else if 1 > 2 {
+            \\    x := 2;
+            \\} else if 3 > 4 {
+            \\    x := 3;
+            \\} else {
+            \\    x := 4;
+            \\}
+            ,
+            .expected =
+            \\if false {
+            \\    x := 1;
+            \\} else if (1 > 2) {
+            \\    x := 2;
+            \\} else if (3 > 4) {
+            \\    x := 3;
+            \\} else {
+            \\    x := 4;
+            \\}
+            ,
+        },
+        .{
+            .source = "if !false {}",
+            .expected = "if (!false) {\n}",
+        },
+        .{
+            .source =
+            \\if x != y {
+            \\    print("not equal");
+            \\}
+            ,
+            .expected =
+            \\if (x != y) {
+            \\    print("not equal");
+            \\}
+            ,
         },
     };
 

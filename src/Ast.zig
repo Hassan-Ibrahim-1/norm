@@ -77,6 +77,29 @@ pub const Stmt = union(enum) {
         }
     };
 
+    pub const If = struct {
+        pub const ElseIf = struct {
+            condition: *Expr,
+            then_block: Block,
+        };
+
+        token: Token, // if
+        condition: *Expr,
+        then_block: Block,
+        else_if_blocks: []ElseIf,
+        else_block: ?Block,
+
+        pub fn format(i: *const If, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("if {f} {f}", .{ i.condition, i.then_block });
+            for (i.else_if_blocks) |else_if| {
+                try w.print(" else if {f} {f}", .{ else_if.condition, else_if.then_block });
+            }
+            if (i.else_block) |else_block| {
+                try w.print(" else {f}", .{else_block});
+            }
+        }
+    };
+
     pub const Print = struct {
         print: Token,
         expr: *Expr,
@@ -87,10 +110,11 @@ pub const Stmt = union(enum) {
     };
 
     expression: Expression,
-    print: Print,
     var_decl: VarDecl,
     var_assign: VarAssign,
     block: Block,
+    if_stmt: If,
+    print: Print,
 
     pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {
         switch (stmt) {
