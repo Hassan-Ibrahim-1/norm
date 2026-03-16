@@ -23,15 +23,25 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] string concatenation
 - [x] string interning for comparisons? look at go for inspiration
 - [x] global constant string table
-- [x] consider adding making specific instructions for each type. right now op_add et al have to deal
+- [x] consider adding making specific instructions for each type.
 - [x] variable declartions + statements + scopes
 - [ ] if statements
 - [ ] variable mutability + assignment
 - [ ] my allocations in sema are absolutely stupid. take for example returning errors as an owned slice
 - [ ] sync points at statement boundaries for parser and sema
 - [ ] rewrite logical operators to have short circuit behavior
-- [ ] loops
+- [ ] c loops
+- [ ] functions
+- [ ] native functions / define signature in norm but implementation can be in zig / c
+- [ ] slices and maps
+- [ ] iterator loops
 - [ ] Runtime errors in VM. Division by zero, index out of bounds, etc.
+- [ ] garbage collection
+- [ ] structs / enums / tagged unions
+- [ ] switch statements
+- [ ] simd vector + matrix
+- [ ] package system
+- [ ] standard library
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
     * how do i handle user defined types? right now im just thinking of interning them
@@ -45,8 +55,6 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
     * https://mukulrathi.com/create-your-own-programming-language/intro-to-type-checking/
     * https://blog.polybdenum.com/2020/07/04/subtype-inference-by-example-part-1-introducing-cubiml.html
 with both floats and integers
-- [ ] Think about reusing Ast stuff in Nir. There's a lot of duplicated code
-- [ ] look at other type checking implementations, mine is unreadable and naive.
 - [ ] Think about debug info, instead of each chunk having line numbers there
 could be pointers to a debug info table. Would allow variable/function names, types etc.
 - [ ] think about garbage collection
