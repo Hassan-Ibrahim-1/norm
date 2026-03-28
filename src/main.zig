@@ -35,7 +35,22 @@ pub fn main() !void {
         stdout.flush() catch unreachable;
     }
 
-    if (args.len > 2) {
+    var dump_mode = false;
+    var file_idx: usize = 1;
+
+    if (args.len > 1 and std.mem.eql(u8, args[1], "-S")) {
+        dump_mode = true;
+        file_idx = 2;
+    }
+
+    if (dump_mode) {
+        if (file_idx >= args.len) {
+            try stderr.print("usage: norm -S [file]\n", .{});
+            try stderr.flush();
+        } else {
+            try dumpChunk(alloc, args[file_idx], stdout, stderr);
+        }
+    } else if (args.len > 2) {
         try stderr.print("usage: norm [file]\n", .{});
         try stderr.flush();
     } else if (args.len == 2) {
@@ -43,6 +58,49 @@ pub fn main() !void {
     } else {
         try repl(alloc, stdout, stderr, stdin);
     }
+}
+
+fn dumpChunk(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !void {
+    _ = stdout; // autofix
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+
+    const source = try file.readToEndAlloc(gpa, 1_000_000);
+    defer gpa.free(source);
+
+    var lexer = Lexer.init(source);
+    var tokens = lexer.scanTokens(gpa);
+    defer tokens.deinit(gpa);
+
+    if (tokens.errors.len > 0) {
+        for (tokens.errors) |diag| {
+            try stderr.print("{s}\n", .{diag.error_msg});
+        }
+        return;
+    }
+
+    var ast = parser.parse(gpa, tokens.tokens, false);
+    defer ast.arena.deinit();
+    if (ast.errors.len > 0) {
+        debug.reportErrors(ast.errors, path, source);
+        return;
+    }
+
+    var nir = sema.analyze(gpa, &ast);
+    defer nir.deinit();
+    if (nir.errors.len > 0) {
+        debug.reportErrors(nir.errors, path, source);
+        return;
+    }
+
+    const stmts = debug.printStmts(gpa, nir.stmts);
+    defer gpa.free(stmts);
+    try stderr.print("{s}\n\n", .{stmts});
+
+    var chunk = compiler.compile(gpa, &nir);
+    defer chunk.deinit();
+
+    debug.disassembleChunk(stderr, &chunk, "main", source);
 }
 
 fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !void {

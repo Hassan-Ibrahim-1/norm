@@ -167,7 +167,12 @@ const Sema = struct {
 
         var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
 
-        // Temporary, remove when functions are implemented
+        // Hoist up all the variable declarations. Makes it simpler for the
+        // compiler, but I'm not sure if this is the best way to do things
+        // though. Variables have to be initialized before declaration
+        // but what if I just emit code for all global var decls before
+        // codegen for other stuff. This also helps sema with variable
+        // redefinition stuff.
         for (stmts) |stmt| {
             if (stmt != .var_decl) continue;
             const nir_stmt = s.statement(stmt);
@@ -219,11 +224,14 @@ const Sema = struct {
                     const nir_stmt = s.statement(b_stmt);
                     nir_stmts.append(s.arena, nir_stmt) catch oom();
                 }
-                return .{ .block = .{
-                    .token = block.token,
-                    .stmts = nir_stmts.items,
-                    .scope = block_scope,
-                } };
+                return .{
+                    .block = .{
+                        .token = block.token,
+                        .stmts = nir_stmts.items,
+                        .scope = block_scope,
+                        .end_token = block.end_token,
+                    },
+                };
             },
             .if_stmt => |if_stmt| {
                 const if_condition = s.expression(if_stmt.condition);
@@ -232,9 +240,13 @@ const Sema = struct {
                 const else_if_blocks =
                     s.arena.alloc(Nir.Stmt.If.ElseIf, if_stmt.else_if_blocks.len) catch oom();
                 for (if_stmt.else_if_blocks, 0..) |else_if, i| {
-                    else_if_blocks[i].condition = s.expression(else_if.condition);
-                    else_if_blocks[i].then_block =
-                        s.statement(.{ .block = else_if.then_block }).block;
+                    const nir_condition = s.expression(else_if.condition);
+                    const nir_then_block = s.statement(.{ .block = else_if.then_block }).block;
+                    else_if_blocks[i] = .{
+                        .token = else_if.token,
+                        .condition = nir_condition,
+                        .then_block = nir_then_block,
+                    };
                 }
 
                 const else_block =

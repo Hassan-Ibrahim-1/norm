@@ -6,10 +6,13 @@ const testing = std.testing;
 
 const opts = @import("opts");
 
+const cast = @import("cast.zig");
+const as = cast.as;
 const compiler = @import("compiler.zig");
 const Chunk = compiler.Chunk;
 const OpCode = compiler.OpCode;
 const debug = @import("debug.zig");
+const dbg = debug.dbg;
 const Lexer = @import("Lexer.zig");
 const parser = @import("parser.zig");
 const sema = @import("sema.zig");
@@ -62,18 +65,19 @@ pub const Vm = struct {
         while (true) {
             const instruction: OpCode = @enumFromInt(vm.readByte());
             if (comptime opts.debug_trace) {
+                const stack_len = vm.stack_top - &vm.stack;
                 _ = debug.disassembleInstruction(
                     vm.stderr,
                     vm.chunk,
                     vm.ip - vm.chunk.code.items.ptr - 1,
                 ) catch unreachable;
 
-                std.debug.print("          ", .{});
-                const stack_len = vm.stack_top - &vm.stack;
+                vm.stderr.print("          ", .{}) catch unreachable;
                 for (0..stack_len) |i| {
-                    std.debug.print("[ {f} ]", .{vm.stack[i]});
+                    vm.stderr.print("[ {f} ]", .{vm.stack[i]}) catch unreachable;
                 }
-                std.debug.print("\n", .{});
+                vm.stderr.print("\n", .{}) catch unreachable;
+                vm.stderr.flush() catch unreachable;
             }
 
             switch (instruction) {
@@ -280,6 +284,16 @@ pub const Vm = struct {
                     vm.popN(n);
                 },
 
+                .op_jump => {
+                    const offset = vm.readShort();
+                    vm.ip += offset;
+                },
+                .op_jump_if_false => {
+                    const offset = vm.readShort();
+                    const condition = vm.pop();
+                    if (!condition.boolean) vm.ip += offset;
+                },
+
                 .op_return => {
                     return vm.pop();
                 },
@@ -353,10 +367,6 @@ pub const Vm = struct {
 fn oom() noreturn {
     @panic("oom");
 }
-
-const cast = @import("cast.zig");
-
-const dbg = debug.dbg;
 
 fn testRun(
     gpa: Allocator,
@@ -494,8 +504,6 @@ test "literals" {
         try testing.expectEqual(t.expected, value);
     }
 }
-
-const as = cast.as;
 
 test "arithmetic" {
     const gpa = testing.allocator;
@@ -919,6 +927,532 @@ test "local variables + scopes" {
             \\}
             ,
             .expected = .{ .string = .ref("hello world") },
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const result = try testRunPrint(gpa, t.source);
+        defer gpa.free(result);
+
+        var temp_writer: Io.Writer.Allocating = .init(gpa);
+        defer temp_writer.deinit();
+
+        try temp_writer.writer.print("{f}\n", .{t.expected});
+        const expected_str = temp_writer.written();
+
+        try testing.expectEqualStrings(expected_str, result);
+    }
+}
+
+test "if statements" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{
+        .{
+            .source =
+            \\if 2 > 1 {
+            \\ print(2);
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+        .{
+            .source =
+            \\if 1 > 1 {
+            \\ print(2);
+            \\} else {
+            \\ print(1);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\if 2 > 13 {
+            \\ print(2);
+            \\} else if 1 < 3 {
+            \\ print(8);
+            \\}
+            ,
+            .expected = .{ .integer = 8 },
+        },
+        .{
+            .source =
+            \\if 1 > 1 {
+            \\ print(2);
+            \\} else if 1 > 3 {
+            \\ print(1);
+            \\} else {
+            \\  print(5);
+            \\}
+            ,
+            .expected = .{ .integer = 5 },
+        },
+        .{
+            .source =
+            \\if 1 > 1 {
+            \\ print(2);
+            \\} else if 2 <= 3 {
+            \\ print(1);
+            \\} else {
+            \\  print(5);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\if 1 >= 1 {
+            \\ print(2);
+            \\} else if 2 <= 3 {
+            \\ print(1);
+            \\} else {
+            \\  print(5);
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+        .{
+            .source =
+            \\if 1 >= 1 {
+            \\ print(2);
+            \\} else if 2 >= 3 {
+            \\ print(1);
+            \\} else {
+            \\  print(5);
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+        .{
+            .source =
+            \\if false {
+            \\ print(1);
+            \\} else {
+            \\ print(2);
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+        .{
+            .source =
+            \\if true {
+            \\ print(1);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\x := 5;
+            \\if x > 3 {
+            \\ print(x);
+            \\}
+            ,
+            .expected = .{ .integer = 5 },
+        },
+        .{
+            .source =
+            \\x := 5;
+            \\if x < 3 {
+            \\ print(1);
+            \\} else {
+            \\ print(x);
+            \\}
+            ,
+            .expected = .{ .integer = 5 },
+        },
+        .{
+            .source =
+            \\if 1 == 1 {
+            \\ print(10);
+            \\} else {
+            \\ print(20);
+            \\}
+            ,
+            .expected = .{ .integer = 10 },
+        },
+        .{
+            .source =
+            \\if 1 != 1 {
+            \\ print(10);
+            \\} else {
+            \\ print(20);
+            \\}
+            ,
+            .expected = .{ .integer = 20 },
+        },
+        .{
+            .source =
+            \\if true and true {
+            \\ print(1);
+            \\} else {
+            \\ print(0);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\if true and false {
+            \\ print(1);
+            \\} else {
+            \\ print(0);
+            \\}
+            ,
+            .expected = .{ .integer = 0 },
+        },
+        .{
+            .source =
+            \\if false or true {
+            \\ print(1);
+            \\} else {
+            \\ print(0);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\if false or false {
+            \\ print(1);
+            \\} else {
+            \\ print(0);
+            \\}
+            ,
+            .expected = .{ .integer = 0 },
+        },
+        .{
+            .source =
+            \\if !false {
+            \\ print(1);
+            \\} else {
+            \\ print(0);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\if !true {
+            \\ print(1);
+            \\} else {
+            \\ print(0);
+            \\}
+            ,
+            .expected = .{ .integer = 0 },
+        },
+        .{
+            .source =
+            \\if 1 > 2 {
+            \\ print(1);
+            \\} else if 2 > 3 {
+            \\ print(2);
+            \\} else if 3 > 4 {
+            \\ print(3);
+            \\} else {
+            \\ print(4);
+            \\}
+            ,
+            .expected = .{ .integer = 4 },
+        },
+        .{
+            .source =
+            \\if 1 > 2 {
+            \\ print(1);
+            \\} else if 2 > 3 {
+            \\ print(2);
+            \\} else if 3 < 4 {
+            \\ print(3);
+            \\} else {
+            \\ print(4);
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\if 1 > 2 {
+            \\ print(1);
+            \\} else if 2 < 3 {
+            \\ print(2);
+            \\} else if 3 > 4 {
+            \\ print(3);
+            \\} else {
+            \\ print(4);
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+        .{
+            .source =
+            \\x := 10;
+            \\if x > 5 {
+            \\   if x > 8 {
+            \\      print(1);
+            \\   } else {
+            \\      print(2);
+            \\   }
+            \\} else {
+            \\   print(3);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\x := 10;
+            \\if x > 5 {
+            \\   if x > 15 {
+            \\      print(1);
+            \\   } else {
+            \\      print(2);
+            \\   }
+            \\} else {
+            \\   print(3);
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+        .{
+            .source =
+            \\x := 10;
+            \\if x > 15 {
+            \\   if x > 20 {
+            \\      print(1);
+            \\   } else {
+            \\      print(2);
+            \\   }
+            \\} else {
+            \\   print(3);
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\if x > 0 {
+            \\   if x > 5 {
+            \\      print(1);
+            \\   } else if x > 2 {
+            \\      print(2);
+            \\   } else {
+            \\      print(3);
+            \\   }
+            \\} else {
+            \\   print(4);
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\if x > 0 {
+            \\   if x > 5 {
+            \\      print(1);
+            \\   } else if x > 2 {
+            \\      print(2);
+            \\   } else if x > 0 {
+            \\      print(3);
+            \\   } else {
+            \\      print(4);
+            \\   }
+            \\} else {
+            \\   print(5);
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\{
+            \\   x := 5;
+            \\   if x > 3 {
+            \\      y := 10;
+            \\      if y > 8 {
+            \\         print(y);
+            \\      }
+            \\   }
+            \\}
+            ,
+            .expected = .{ .integer = 10 },
+        },
+        .{
+            .source =
+            \\{
+            \\   a := 1;
+            \\   if a == 1 {
+            \\      b := 2;
+            \\      if b == 2 {
+            \\         c := 3;
+            \\         print(c);
+            \\      }
+            \\   }
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\x := 0;
+            \\if x == 0 {
+            \\   print(1);
+            \\} else if x == 1 {
+            \\   print(2);
+            \\} else if x == 2 {
+            \\   print(3);
+            \\} else if x == 3 {
+            \\   print(4);
+            \\} else if x == 4 {
+            \\   print(5);
+            \\} else {
+            \\   print(6);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\x := 2;
+            \\if x == 0 {
+            \\   print(1);
+            \\} else if x == 1 {
+            \\   print(2);
+            \\} else if x == 2 {
+            \\   print(3);
+            \\} else if x == 3 {
+            \\   print(4);
+            \\} else if x == 4 {
+            \\   print(5);
+            \\} else {
+            \\   print(6);
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\x := 5;
+            \\if x == 0 {
+            \\   print(1);
+            \\} else if x == 1 {
+            \\   print(2);
+            \\} else if x == 2 {
+            \\   print(3);
+            \\} else if x == 3 {
+            \\   print(4);
+            \\} else if x == 4 {
+            \\   print(5);
+            \\} else {
+            \\   print(6);
+            \\}
+            ,
+            .expected = .{ .integer = 6 },
+        },
+        .{
+            .source =
+            \\if true {
+            \\   if true {
+            \\      if true {
+            \\         print(1);
+            \\      }
+            \\   }
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\if true {
+            \\   if false {
+            \\      print(1);
+            \\   } else {
+            \\      print(2);
+            \\   }
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+        .{
+            .source =
+            \\if false {
+            \\   print(1);
+            \\} else {
+            \\   if false {
+            \\      print(2);
+            \\   } else {
+            \\      print(3);
+            \\   }
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\if 1 + 1 == 2 {
+            \\ print(1);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\if 2 * 3 > 5 {
+            \\ print(1);
+            \\} else {
+            \\ print(2);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\x := 5;
+            \\if x * 2 > 8 {
+            \\ print(1);
+            \\} else {
+            \\ print(2);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\if 10 / 2 == 5 {
+            \\ print(1);
+            \\} else {
+            \\ print(2);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\x := 5;
+            \\if x > 3 and x < 10 {
+            \\ print(1);
+            \\} else {
+            \\ print(2);
+            \\}
+            ,
+            .expected = .{ .integer = 1 },
+        },
+        .{
+            .source =
+            \\x := 5;
+            \\if x < 3 or x > 10 {
+            \\ print(1);
+            \\} else {
+            \\ print(2);
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
         },
     };
 

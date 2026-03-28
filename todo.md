@@ -26,6 +26,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] consider adding making specific instructions for each type.
 - [x] variable declartions + statements + scopes
 - [ ] if statements
+- [ ] update disassembleInstruction in debug to actually work with new opcode
 - [ ] variable mutability + assignment
 - [ ] my allocations in sema are absolutely stupid. take for example returning errors as an owned slice
 - [ ] sync points at statement boundaries for parser and sema
@@ -42,6 +43,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [ ] simd vector + matrix
 - [ ] package system
 - [ ] standard library
+- [ ] handle integers that are too big or too small, same for floats, this can be done in parser.
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
     * how do i handle user defined types? right now im just thinking of interning them
@@ -273,3 +275,23 @@ main := fn () {
 }
 
 ```
+
+
+if 1 > 2 {
+    print(1);
+} else {
+    print(2);
+}
+
+// condition
+%0 op_constant 1
+%1 op_constant 2
+%2 op_greater
+%3 op_jump_if_false (7 - %3)
+// then
+%4 op_constant 1
+%5 op_print
+%6 op_jump ((8 + 1) - %6)
+// else
+%7 op_constant 2
+%8 op_print

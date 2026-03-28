@@ -160,11 +160,13 @@ const Parser = struct {
 
         var else_if_blocks: std.ArrayList(Ast.Stmt.If.ElseIf) = .empty;
         while (p.matchBoth(.kw_else, .kw_if) and !p.isAtEnd()) {
+            const else_if_token = p.previous;
             const else_if_condition = p.expression(.lowest);
             p.consume(.left_brace, "Expect '{' after else if condition");
             const else_if_then_block = p.blockStmt().block;
 
             else_if_blocks.append(p.arena, .{
+                .token = else_if_token,
                 .condition = else_if_condition,
                 .then_block = else_if_then_block,
             }) catch oom();
@@ -197,8 +199,15 @@ const Parser = struct {
         }
 
         p.consume(.right_brace, "Expect '}' after block statement");
+        const end_token = p.previous;
 
-        return .{ .block = .{ .stmts = stmts.items, .token = token } };
+        return .{
+            .block = .{
+                .stmts = stmts.items,
+                .token = token,
+                .end_token = end_token,
+            },
+        };
     }
 
     fn expressionStmt(p: *Parser) Ast.Stmt {

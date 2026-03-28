@@ -34,8 +34,8 @@ pub const Symbol = struct {
 
 pub const SymbolTable = struct {
     gpa: Allocator,
-    top: SymMap,
     arena: std.heap.ArenaAllocator,
+    top: SymMap,
     locals: std.AutoHashMapUnmanaged(*Scope, Locals),
     top_scope: *Scope,
     current_scope: *Scope,
@@ -162,6 +162,8 @@ pub const SymbolTable = struct {
         }
     }
 
+    // x := 1
+
     /// If the return value is null then it means that the symbol
     /// has already been defined.
     pub fn findOrRegister(st: *SymbolTable, name: []const u8) ?*Symbol {
@@ -256,6 +258,7 @@ pub const Stmt = union(enum) {
 
     pub const Block = struct {
         token: Token, // {
+        end_token: Token, // }
         stmts: []Stmt,
         scope: *Scope,
 
@@ -279,6 +282,7 @@ pub const Stmt = union(enum) {
 
     pub const If = struct {
         pub const ElseIf = struct {
+            token: Token, // if
             condition: *Expr,
             then_block: Block,
         };

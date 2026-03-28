@@ -66,6 +66,7 @@ pub const Stmt = union(enum) {
 
     pub const Block = struct {
         token: Token, // {
+        end_token: Token, // }
         stmts: []Stmt,
 
         pub fn format(b: *const Stmt.Block, w: *Io.Writer) Io.Writer.Error!void {
@@ -79,6 +80,7 @@ pub const Stmt = union(enum) {
 
     pub const If = struct {
         pub const ElseIf = struct {
+            token: Token, // if
             condition: *Expr,
             then_block: Block,
         };

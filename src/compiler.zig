@@ -9,6 +9,7 @@ const assert = std.debug.assert;
 const debug = @import("debug.zig");
 const dbg = debug.dbg;
 const ers = @import("errors.zig");
+const as = @import("cast.zig").as;
 const Lexer = @import("Lexer.zig");
 const Nir = @import("Nir.zig");
 const NormType = Nir.NormType;
@@ -125,6 +126,17 @@ pub const OpCode = enum(u8) {
     // VM: Pop n values off the stack and discard then
     op_pop_n,
 
+    // op_jump <offset: u16>
+    //
+    // Move forward by `offset` instructions
+    op_jump,
+
+    // op_jump_forward_if_false <offset: u16>
+    //
+    // Look at the top of the stack and if the value is false then
+    // move forward by `offset` instructions
+    op_jump_if_false,
+
     // Temporary: Signals end of execution
     op_return,
 
@@ -166,6 +178,7 @@ pub const Chunk = struct {
         const arr = c.code.addManyAsArray(c.gpa, 2) catch oom();
         mem.writeInt(u16, arr, b, .little);
         c.lines.append(c.gpa, line) catch oom();
+        c.lines.append(c.gpa, line) catch oom();
     }
 
     pub fn writeOp(c: *Chunk, op: OpCode, line: u32) void {
@@ -179,6 +192,8 @@ pub const Chunk = struct {
             c.write(@intCast(i), line);
         } else {
             c.writeOp(.op_constant_long, line);
+            c.lines.append(c.gpa, line) catch oom();
+            c.lines.append(c.gpa, line) catch oom();
             const arr = c.code.addManyAsArray(c.gpa, 3) catch oom();
             mem.writeInt(u24, arr, @intCast(i), .little);
         }
@@ -206,11 +221,6 @@ pub const Chunk = struct {
         c.string_arena.deinit();
         c.* = undefined;
     }
-};
-
-const ResolvedSymbol = struct {
-    ident: Token,
-    sym: Nir.Symbol,
 };
 
 pub const Compiler = struct {
@@ -262,14 +272,75 @@ pub const Compiler = struct {
             },
             .block => |block| {
                 c.beginScope(block.scope);
-                defer c.endScope();
+                defer c.endScope(block.end_token.line);
                 for (block.stmts) |block_stmt| {
                     c.statement(block_stmt);
                 }
             },
             .var_assign => @panic("todo"),
-            .if_stmt => @panic("todo"),
+            .if_stmt => |if_stmt| {
+                const has_branches = if_stmt.else_block != null or if_stmt.else_if_blocks.len != 0;
+
+                c.expression(if_stmt.condition);
+                const if_false_jump = c.emitJump(.op_jump_if_false, if_stmt.token.line);
+
+                c.statement(.{ .block = if_stmt.then_block });
+                const if_true_jump = if (has_branches)
+                    c.emitJump(.op_jump, if_stmt.then_block.end_token.line)
+                else
+                    0;
+
+                c.patchJump(if_false_jump);
+
+                const else_if_true_jumps =
+                    c.scratch.alloc(usize, if_stmt.else_if_blocks.len) catch oom();
+                defer c.scratch.free(else_if_true_jumps);
+
+                for (if_stmt.else_if_blocks, 0..) |else_if, i| {
+                    const last_branch = if_stmt.else_block == null and i == if_stmt.else_if_blocks.len - 1;
+
+                    c.expression(else_if.condition);
+                    const else_if_false_jump = c.emitJump(.op_jump_if_false, else_if.token.line);
+
+                    c.statement(.{ .block = else_if.then_block });
+                    else_if_true_jumps[i] = if (last_branch)
+                        0
+                    else
+                        c.emitJump(.op_jump, else_if.then_block.end_token.line);
+
+                    c.patchJump(else_if_false_jump);
+                }
+
+                if (if_stmt.else_block) |else_block| {
+                    c.statement(.{ .block = else_block });
+                }
+
+                if (has_branches) {
+                    c.patchJump(if_true_jump);
+                }
+
+                for (else_if_true_jumps) |jump| {
+                    if (jump == 0) continue;
+                    c.patchJump(jump);
+                }
+            },
         }
+    }
+
+    /// returns the index of the jump opcode
+    fn emitJump(c: *Compiler, jump: OpCode, line: u32) usize {
+        const jump_index = c.compiling_chunk.code.items.len;
+        c.emitOpCode(jump, line);
+        c.emitShort(0xff, line);
+        return jump_index;
+    }
+
+    fn patchJump(c: *Compiler, jump_index: usize) void {
+        const code = c.compiling_chunk.code.items;
+        const offset_arg = code[jump_index + 1 .. jump_index + 3][0..2];
+        // the -2 is there to account for vm reading the offset short first.
+        const offset = as(u16, code.len - jump_index - 3);
+        mem.writeInt(u16, offset_arg, offset, .little);
     }
 
     fn findSym(c: *Compiler, name: []const u8) *Nir.Symbol {
@@ -280,17 +351,17 @@ pub const Compiler = struct {
         c.current_scope = scope;
     }
 
-    fn endScope(c: *Compiler) void {
+    fn endScope(c: *Compiler, line: u32) void {
         defer c.current_scope = c.current_scope.parent;
         const locals = c.sym_table.locals.get(c.current_scope).?;
         const local_count = locals.locals.count();
 
         switch (local_count) {
             0 => {},
-            1 => c.emitOpCode(.op_pop, 0),
+            1 => c.emitOpCode(.op_pop, line),
             else => {
-                c.emitOpCode(.op_pop_n, 0);
-                c.emitShort(@intCast(local_count), 0);
+                c.emitOpCode(.op_pop_n, line);
+                c.emitShort(@intCast(local_count), line);
             },
         }
     }
@@ -819,13 +890,13 @@ test "global variables - simple op_store" {
         .{
             .source = "x := 10;",
             .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_store, 0, 0, .op_return }),
-            .expected_lines = &.{ 1, 1, 1, 1, 0 },
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{.{ .integer = 10 }},
         },
         .{
             .source = "x := 10; y := false;",
             .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_store, 0, 0, .op_false, .op_store, 1, 0, .op_return }),
-            .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 1, 0 },
+            .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 0 },
             .expected_constants = &.{.{ .integer = 10 }},
         },
     };
@@ -847,7 +918,12 @@ test "global variables - op_load" {
     const tests: []const TestCaseMinimal = &.{
         .{
             .source = "x := 10; x;",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_store, 0, 0, .op_load, 0, 0, .op_return }),
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_load, 0, 0,
+                .op_return,
+            }),
             .expected_constants = &.{.{ .integer = 10 }},
         },
         .{
@@ -1081,6 +1157,358 @@ test "local variables and scopes - op_load, op_store and scope popping" {
                 .op_return,
             }),
             .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 1 }, .{ .integer = 1 } },
+        },
+    };
+    // zig fmt: on
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "if statements no variables" {
+    @setEvalBranchQuota(100000);
+    const gpa = testing.allocator;
+    // zig fmt: off
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source =
+            \\if 2 > 1 {
+            \\ print(2);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_constant, 1,
+                .op_greater_int,
+                .op_jump_if_false, 3, 0,
+                .op_constant, 2,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{.{ .integer = 2 }, .{ .integer = 1 }, .{ .integer = 2 }},
+        },
+        .{
+            .source =
+            \\if 2 > 1 {
+            \\ print(2);
+            \\} else {
+            \\ print(1);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_constant, 1,
+                .op_greater_int,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 2,
+                .op_temp_print,
+                .op_jump, 3, 0,
+                .op_constant, 3,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{.{ .integer = 2 }, .{ .integer = 1 }, .{ .integer = 2 }, .{.integer = 1}},
+        },
+        .{
+            .source =
+            \\if 2 > 1 {
+            \\ print(2);
+            \\} else if 1 < 3 {
+            \\ print(1);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_constant, 1,
+                .op_greater_int,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 2,
+                .op_temp_print,
+                .op_jump, 11, 0,
+                .op_constant, 3,
+                .op_constant, 4,
+                .op_less_int,
+                .op_jump_if_false, 3, 0,
+                .op_constant, 5,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{
+                .{ .integer = 2 },
+                .{ .integer = 1 },
+                .{ .integer = 2 },
+                .{ .integer = 1 },
+                .{ .integer = 3 },
+                .{ .integer = 1 },
+            },
+        },
+        .{
+            .source =
+            \\if 2 > 1 {
+            \\ print(2);
+            \\} else if 1 < 3 {
+            \\ print(1);
+            \\} else {
+            \\  print(5);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_constant, 1,
+                .op_greater_int,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 2,
+                .op_temp_print,
+                .op_jump, 17, 0,
+                .op_constant, 3,
+                .op_constant, 4,
+                .op_less_int,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 5,
+                .op_temp_print,
+                .op_jump, 3, 0,
+                .op_constant, 6,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{
+                .{ .integer = 2 },
+                .{ .integer = 1 },
+                .{ .integer = 2 },
+                .{ .integer = 1 },
+                .{ .integer = 3 },
+                .{ .integer = 1 },
+                .{ .integer = 5 },
+            },
+        },
+        .{
+            .source =
+            \\if true {
+            \\    if false {
+            \\        print(1);
+            \\    }
+            \\    print(2);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_true,
+                .op_jump_if_false, 10, 0,
+                .op_false,
+                .op_jump_if_false, 3, 0,
+                .op_constant, 0,
+                .op_temp_print,
+                .op_constant, 1,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\if true {
+            \\    print(1);
+            \\    print(2);
+            \\    print(3);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_true,
+                .op_jump_if_false, 9, 0,
+                .op_constant, 0,
+                .op_temp_print,
+                .op_constant, 1,
+                .op_temp_print,
+                .op_constant, 2,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 }, .{ .integer = 3 } },
+        },
+        .{
+            .source =
+            \\if false {
+            \\    print(1);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_false,
+                .op_jump_if_false, 3, 0,
+                .op_constant, 0,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{.{ .integer = 1 }},
+        },
+        .{
+            .source =
+            \\if false {
+            \\    print(1);
+            \\} else {
+            \\    print(2);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_false,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 0,
+                .op_temp_print,
+                .op_jump, 3, 0,
+                .op_constant, 1,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\if 1 > 2 {
+            \\    print(1);
+            \\} else if 2 > 3 {
+            \\    print(2);
+            \\} else if 3 > 4 {
+            \\    print(3);
+            \\} else {
+            \\    print(4);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_constant, 1,
+                .op_greater_int,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 2,
+                .op_temp_print,
+                .op_jump, 31, 0,
+                .op_constant, 3,
+                .op_constant, 4,
+                .op_greater_int,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 5,
+                .op_temp_print,
+                .op_jump, 17, 0,
+                .op_constant, 6,
+                .op_constant, 7,
+                .op_greater_int,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 8,
+                .op_temp_print,
+                .op_jump, 3, 0,
+                .op_constant, 9,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{
+                .{ .integer = 1 },
+                .{ .integer = 2 },
+                .{ .integer = 1 },
+                .{ .integer = 2 },
+                .{ .integer = 3 },
+                .{ .integer = 2 },
+                .{ .integer = 3 },
+                .{ .integer = 4 },
+                .{ .integer = 3 },
+                .{ .integer = 4 },
+            },
+        },
+        .{
+            .source =
+            \\if true and false {
+            \\    print(1);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_true,
+                .op_false,
+                .op_and,
+                .op_jump_if_false, 3, 0,
+                .op_constant, 0,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{.{ .integer = 1 }},
+        },
+        .{
+            .source =
+            \\if true or false {
+            \\    print(1);
+            \\} else {
+            \\    print(2);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_true,
+                .op_false,
+                .op_or,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 0,
+                .op_temp_print,
+                .op_jump, 3, 0,
+                .op_constant, 1,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\if false {
+            \\    print(1);
+            \\} else if false {
+            \\    print(2);
+            \\} else if false {
+            \\    print(3);
+            \\} else if false {
+            \\    print(4);
+            \\} else if true {
+            \\    print(5);
+            \\} else {
+            \\    print(6);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_false,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 0,
+                .op_temp_print,
+                .op_jump, 43, 0,
+                .op_false,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 1,
+                .op_temp_print,
+                .op_jump, 33, 0,
+                .op_false,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 2,
+                .op_temp_print,
+                .op_jump, 23, 0,
+                .op_false,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 3,
+                .op_temp_print,
+                .op_jump, 13, 0,
+                .op_true,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 4,
+                .op_temp_print,
+                .op_jump, 3, 0,
+                .op_constant, 5,
+                .op_temp_print,
+                .op_return,
+            }),
+            .expected_constants = &.{
+                .{ .integer = 1 },
+                .{ .integer = 2 },
+                .{ .integer = 3 },
+                .{ .integer = 4 },
+                .{ .integer = 5 },
+                .{ .integer = 6 },
+            },
         },
     };
     // zig fmt: on

@@ -5,15 +5,28 @@ const Ast = @import("Ast.zig");
 const Chunk = compiler.Chunk;
 const OpCode = compiler.OpCode;
 const Io = std.Io;
+const mem = std.mem;
+const fmt = std.fmt;
 
 pub fn disassembleChunk(
     w: *Io.Writer,
     chunk: *const Chunk,
     name: []const u8,
+    source: []const u8,
 ) void {
     w.print("== {s} ==\n", .{name}) catch unreachable;
     var offset: usize = 0;
+    var prev_line: u32 = 0;
     while (offset < chunk.code.items.len) {
+        if (offset < chunk.lines.items.len) {
+            const line = chunk.lines.items[offset];
+            if (line != prev_line and line > 0) {
+                const line_str = getLine(source, line);
+                const line_str_trim = mem.trim(u8, line_str, " ");
+                w.print("// \"{s}\"\n", .{line_str_trim}) catch unreachable;
+            }
+            prev_line = line;
+        }
         offset = disassembleInstruction(w, chunk, offset) catch unreachable;
     }
 }
@@ -33,11 +46,11 @@ pub fn disassembleInstruction(
     );
     try w.print("{s} ", .{buf});
 
-    if (offset > 0 and
+    if (offset > 0 and offset < chunk.lines.items.len and
         chunk.lines.items[offset] == chunk.lines.items[offset - 1])
     {
         try w.print("   | ", .{});
-    } else {
+    } else if (offset < chunk.lines.items.len) {
         _ = fmt.printInt(
             &buf,
             chunk.lines.items[offset],
@@ -46,21 +59,62 @@ pub fn disassembleInstruction(
             .{ .width = 4, .fill = ' ' },
         );
         try w.print("{s} ", .{buf});
+    } else {
+        try w.print("    ", .{});
     }
 
     const instruction: OpCode = @enumFromInt(chunk.code.items[offset]);
 
     return switch (instruction) {
-        .op_add,
-        .op_subtract,
-        .op_multiply,
-        .op_divide,
-        .op_negate,
+        .op_constant => constantInstruction(w, instruction, chunk, offset),
+        .op_constant_long => longConstantInstruction(w, instruction, chunk, offset),
+
+        .op_add_int,
+        .op_subtract_int,
+        .op_multiply_int,
+        .op_add_float,
+        .op_subtract_float,
+        .op_multiply_float,
+        .op_divide_float,
+        .op_concat,
+        .op_true,
+        .op_false,
+        .op_negate_int,
+        .op_negate_float,
+        .op_equal_int,
+        .op_not_equal_int,
+        .op_greater_int,
+        .op_greater_equal_int,
+        .op_less_int,
+        .op_less_equal_int,
+        .op_equal_float,
+        .op_not_equal_float,
+        .op_greater_float,
+        .op_greater_equal_float,
+        .op_less_float,
+        .op_less_equal_float,
+        .op_equal_string,
+        .op_not_equal_string,
+        .op_equal_bool,
+        .op_not_equal_bool,
+        .op_and,
+        .op_or,
+        .op_not,
+        .op_nil,
+        .op_cast_to_int,
+        .op_cast_to_float,
+        .op_temp_print,
+        .op_pop,
         .op_return,
         => simpleInstruction(w, instruction, offset),
 
-        .op_constant => constantInstruction(w, instruction, chunk, offset),
-        .op_constant_long => longConstantInstruction(w, instruction, chunk, offset),
+        .op_store,
+        .op_load,
+        .op_jump,
+        .op_jump_if_false,
+        => shortInstruction(w, instruction, chunk, offset),
+
+        .op_pop_n => popNInstruction(w, instruction, chunk, offset),
     };
 }
 
@@ -91,8 +145,6 @@ fn constantInstruction(
     return offset + 2;
 }
 
-const mem = std.mem;
-
 fn longConstantInstruction(
     w: *Io.Writer,
     instruction: OpCode,
@@ -109,6 +161,40 @@ fn longConstantInstruction(
         },
     );
     return offset + 4;
+}
+
+fn shortInstruction(
+    w: *Io.Writer,
+    instruction: OpCode,
+    chunk: *const Chunk,
+    offset: usize,
+) Io.Writer.Error!usize {
+    const slot = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
+    try w.print(
+        "{s:<16} {d:>4}\n",
+        .{
+            @tagName(instruction),
+            slot,
+        },
+    );
+    return offset + 3;
+}
+
+fn popNInstruction(
+    w: *Io.Writer,
+    instruction: OpCode,
+    chunk: *const Chunk,
+    offset: usize,
+) Io.Writer.Error!usize {
+    const n = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
+    try w.print(
+        "{s:<16} {d:>4}\n",
+        .{
+            @tagName(instruction),
+            n,
+        },
+    );
+    return offset + 3;
 }
 
 pub fn dbgw(w: *Io.Writer, prefix: []const u8, value: anytype) @TypeOf(value) {
@@ -135,7 +221,6 @@ pub fn dbgr(prefix: []const u8, value: anytype) @TypeOf(value) {
 }
 
 const trait = @import("trait.zig");
-const fmt = std.fmt;
 
 pub fn opCodeToBytes(ops: anytype) [ops.len]u8 {
     var bytes: [ops.len]u8 = undefined;
@@ -181,4 +266,13 @@ pub fn printStmts(gpa: Allocator, stmts: anytype) []u8 {
 
 fn oom() noreturn {
     @panic("oom");
+}
+
+fn getLine(str: []const u8, line: u32) []const u8 {
+    var iter = mem.splitScalar(u8, str, '\n');
+    var i: usize = 0;
+    while (iter.next()) |line_str| : (i += 1) {
+        if (i == line - 1) return line_str;
+    }
+    return "";
 }
