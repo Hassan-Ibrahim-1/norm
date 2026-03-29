@@ -43,14 +43,16 @@ pub const Stmt = union(enum) {
         // At least one of the below in non-null
         type_expr: ?*Expr,
         value: ?*Expr,
+        mutable: bool,
 
         pub fn format(vd: *const Stmt.VarDecl, w: *Io.Writer) Io.Writer.Error!void {
+            const mut = if (vd.mutable) "mut " else "";
             if (vd.type_expr != null and vd.value != null) {
-                try w.print("{s}: {f} = {f};", .{ vd.ident.lexeme, vd.type_expr.?, vd.value.? });
+                try w.print("{s}{s}: {f} = {f};", .{ mut, vd.ident.lexeme, vd.type_expr.?, vd.value.? });
             } else if (vd.type_expr != null) {
-                try w.print("{s}: {f};", .{ vd.ident.lexeme, vd.type_expr.? });
+                try w.print("{s}{s}: {f};", .{ mut, vd.ident.lexeme, vd.type_expr.? });
             } else {
-                try w.print("{s} := {f};", .{ vd.ident.lexeme, vd.value.? });
+                try w.print("{s}{s} := {f};", .{ mut, vd.ident.lexeme, vd.value.? });
             }
         }
     };

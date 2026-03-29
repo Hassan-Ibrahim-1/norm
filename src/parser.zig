@@ -135,9 +135,11 @@ const Parser = struct {
         if (p.check(.identifier)) {
             if (p.checkNextEither(.colon, .colon_equal)) {
                 p.advance();
-                return p.varDecl();
+                return p.varDecl(false);
             }
-            // p.reportError(.{ .error_msg = "idk man", .line = p.previous.line });
+        } else if (p.match(.kw_mut)) {
+            p.consume(.identifier, "Expect identifier after mut");
+            return p.varDecl(true);
         } else if (p.match(.left_brace)) {
             return p.blockStmt();
         } else if (p.match(.kw_if)) {
@@ -227,7 +229,7 @@ const Parser = struct {
         return .{ .print = .{ .print = print, .expr = expr } };
     }
 
-    fn varDecl(p: *Parser) Ast.Stmt {
+    fn varDecl(p: *Parser, mutable: bool) Ast.Stmt {
         const ident = p.previous;
 
         var type_expr: ?*Ast.Expr = null;
@@ -240,6 +242,7 @@ const Parser = struct {
                         .ident = ident,
                         .type_expr = type_expr,
                         .value = null,
+                        .mutable = mutable,
                     },
                 };
             }
@@ -255,6 +258,7 @@ const Parser = struct {
                 .ident = ident,
                 .type_expr = type_expr,
                 .value = value,
+                .mutable = mutable,
             },
         };
     }
@@ -1109,6 +1113,47 @@ test "if statements" {
             \\    print("not equal");
             \\}
             ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testParseStmts(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "mut var decl" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "mut x := 10;",
+            .expected = "mut x := 10;",
+        },
+        .{
+            .source = "mut x: int;",
+            .expected = "mut x: int;",
+        },
+        .{
+            .source = "mut x: int = 10 + 2;",
+            .expected = "mut x: int = (10 + 2);",
+        },
+        .{
+            .source = "mut x: int = 10 + 2.0 * 3;",
+            .expected = "mut x: int = (10 + (2.000 * 3));",
+        },
+        .{
+            .source = "mut x: bool = 2 > 1 and 1 < 2;",
+            .expected = "mut x: bool = ((2 > 1) and (1 < 2));",
+        },
+        .{
+            .source = "mut x: string = \"Hello, \" + \"World\";",
+            .expected = "mut x: string = (\"Hello, \" + \"World\");",
         },
     };
 
