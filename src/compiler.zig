@@ -1523,6 +1523,320 @@ test "if statements no variables" {
     }
 }
 
+test "if statements with variable declarations - scope ends properly" {
+    @setEvalBranchQuota(100000);
+    const gpa = testing.allocator;
+    // zig fmt: off
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source =
+            \\if true {
+            \\    x := 1;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_true,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_pop,
+                .op_return,
+            }),
+            .expected_constants = &.{.{ .integer = 1 }},
+        },
+        .{
+            .source =
+            \\if false {
+            \\    x := 1;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_false,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_pop,
+                .op_return,
+            }),
+            .expected_constants = &.{.{ .integer = 1 }},
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\if true {
+            \\    y := 2;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // x
+                .op_constant, 0,
+                .op_store, 0, 0,
+                // if block
+                .op_true,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 1,
+                .op_store, 1, 0,
+                .op_pop,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\if true {
+            \\    x := 1;
+            \\} else {
+            \\    x := 2;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_true,
+                .op_jump_if_false, 9, 0,
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_pop,
+                .op_jump, 6, 0,
+                .op_constant, 1,
+                .op_store, 0, 0,
+                .op_pop,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 1;
+            \\    if true {
+            \\        b := 2;
+            \\    }
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // a
+                .op_constant, 0,
+                .op_store, 0, 0,
+                // if block
+                .op_true,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 1,
+                .op_store, 1, 0,
+                .op_pop,
+                // scope end
+                .op_pop,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\if true {
+            \\    if false {
+            \\        x := 1;
+            \\    }
+            \\    y := 2;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_true,
+                .op_jump_if_false, 16, 0,
+                .op_false,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_pop,
+                .op_constant, 1,
+                .op_store, 0, 0,
+                .op_pop,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\if true and false {
+            \\    x := 1;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_true,
+                .op_false,
+                .op_and,
+                .op_jump_if_false, 6, 0,
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_pop,
+                .op_return,
+            }),
+            .expected_constants = &.{.{ .integer = 1 }},
+        },
+        .{
+            .source =
+            \\x := 1;
+            \\if x > 0 {
+            \\    y := x + 1;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // x
+                .op_constant, 0,
+                .op_store, 0, 0,
+                // condition
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_greater_int,
+                // if block
+                .op_jump_if_false, 10, 0,
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_add_int,
+                .op_store, 1, 0,
+                .op_pop,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 0 }, .{ .integer = 1 } },
+        },
+        .{
+            .source =
+            \\if true {
+            \\    x := 1;
+            \\    y := 2;
+            \\    z := 3;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_true,
+                .op_jump_if_false, 18, 0,
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_constant, 1,
+                .op_store, 1, 0,
+                .op_constant, 2,
+                .op_store, 2, 0,
+                .op_pop_n, 3, 0,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 }, .{ .integer = 3 } },
+        },
+        .{
+            .source =
+            \\if true {
+            \\    a := 1;
+            \\    if true {
+            \\        b := 2;
+            \\        c := 3;
+            \\    }
+            \\    d := 4;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_true,
+                .op_jump_if_false, 30, 0,
+                // a
+                .op_constant, 0,
+                .op_store, 0, 0,
+                // nested if
+                .op_true,
+                .op_jump_if_false, 13, 0,
+                // b, c
+                .op_constant, 1,
+                .op_store, 1, 0,
+                .op_constant, 2,
+                .op_store, 2, 0,
+                .op_pop_n, 2, 0,
+                // d
+                .op_constant, 3,
+                .op_store, 1, 0,
+                // pop a, d (use pop_n since there are 2)
+                .op_pop_n, 2, 0,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 }, .{ .integer = 3 }, .{ .integer = 4 } },
+        },
+
+        .{
+            .source =
+            \\{
+            \\    if true {
+            \\        a := 1;
+            \\        b := 2;
+            \\    } else {
+            \\        c := 3;
+            \\        d := 4;
+            \\    }
+            \\    e := 5;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // if-else
+                .op_true,
+                .op_jump_if_false, 16, 0,
+                // a, b
+                .op_constant, 0,
+                .op_store, 0, 0,
+                .op_constant, 1,
+                .op_store, 1, 0,
+                .op_pop_n, 2, 0,
+                .op_jump, 13, 0,
+                // c, d
+                .op_constant, 2,
+                .op_store, 0, 0,
+                .op_constant, 3,
+                .op_store, 1, 0,
+                .op_pop_n, 2, 0,
+                // e
+                .op_constant, 4,
+                .op_store, 0, 0,
+                // scope end
+                .op_pop,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 }, .{ .integer = 3 }, .{ .integer = 4 }, .{ .integer = 5 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 1;
+            \\    if a > 0 {
+            \\        b := a + 1;
+            \\    }
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // a
+                .op_constant, 0,
+                .op_store, 0, 0,
+                // condition a > 0
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_greater_int,
+                .op_jump_if_false, 10, 0,
+                // b := a + 1
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_add_int,
+                .op_store, 1, 0,
+                // pop b
+                .op_pop,
+                // pop a
+                .op_pop,
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 0 }, .{ .integer = 1 } },
+        },
+    };
+    // zig fmt: on
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
 test "temporary print opcode" {
     const gpa = testing.allocator;
     const tests: []const TestCaseMinimal = &.{

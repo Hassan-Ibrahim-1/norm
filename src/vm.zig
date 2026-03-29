@@ -1454,6 +1454,232 @@ test "if statements" {
             ,
             .expected = .{ .integer = 2 },
         },
+        .{
+            .source =
+            \\{
+            \\    x := 1;
+            \\    if true {
+            \\        y := 2;
+            \\        z := 3;
+            \\        print(y + z);
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 5 },
+        },
+        .{
+            .source =
+            \\{
+            \\    if true {
+            \\        a := 1;
+            \\        b := 2;
+            \\        c := a + b;
+            \\        print(c);
+            \\    } else {
+            \\        d := 10;
+            \\        print(d);
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\{
+            \\    if false {
+            \\        a := 1;
+            \\        print(a);
+            \\    } else {
+            \\        b := 5;
+            \\        c := 10;
+            \\        print(b + c);
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 15 },
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 10;
+            \\    if x > 5 {
+            \\        a := x + 1;
+            \\        b := x + 2;
+            \\        print(a + b);
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 23 },
+        },
+        .{
+            .source =
+            \\{
+            \\    if true {
+            \\        if true {
+            \\            x := 1;
+            \\            y := 2;
+            \\            print(x + y);
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\{
+            \\    if true {
+            \\        a := 1;
+            \\        if a > 0 {
+            \\            b := 2;
+            \\            c := 3;
+            \\            print(a + b + c);
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 6 },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 1;
+            \\    if a == 1 {
+            \\        b := 2;
+            \\        if b == 2 {
+            \\            c := 3;
+            \\            d := 4;
+            \\            print(b + c + d);
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 9 },
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 0;
+            \\    if x == 0 {
+            \\        a := 1;
+            \\        b := 2;
+            \\        print(a + b);
+            \\    } else if x == 1 {
+            \\        c := 3;
+            \\        d := 4;
+            \\        print(c + d);
+            \\    } else {
+            \\        e := 5;
+            \\        f := 6;
+            \\        print(e + f);
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 3 },
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 1;
+            \\    if x == 0 {
+            \\        a := 1;
+            \\        print(a);
+            \\    } else if x == 1 {
+            \\        b := 2;
+            \\        c := 3;
+            \\        print(b + c);
+            \\    } else {
+            \\        d := 4;
+            \\        print(d);
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 5 },
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 2;
+            \\    if x == 0 {
+            \\        a := 1;
+            \\        print(a);
+            \\    } else if x == 1 {
+            \\        b := 2;
+            \\        print(b);
+            \\    } else {
+            \\        e := 10;
+            \\        f := 20;
+            \\        print(e + f);
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 30 },
+        },
+        .{
+            .source =
+            \\{
+            \\    outer := 5;
+            \\    if outer > 0 {
+            \\        inner := 10;
+            \\        if inner > 5 {
+            \\            result := outer + inner;
+            \\            print(result);
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 15 },
+        },
+        .{
+            .source =
+            \\{
+            \\    x := 1;
+            \\    if x > 0 {
+            \\        a := x + 1;
+            \\        if a > 1 {
+            \\            b := a + 1;
+            \\            if b > 2 {
+            \\                c := b + 1;
+            \\                print(c);
+            \\            }
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 4 },
+        },
+        .{
+            .source =
+            \\{
+            \\    if true {
+            \\        x := 1;
+            \\    }
+            \\    if true {
+            \\        y := 2;
+            \\        print(y);
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+        .{
+            .source =
+            \\{
+            \\    a := 10;
+            \\    if a > 5 {
+            \\        b := a * 2;
+            \\        if b > 15 {
+            \\            c := b - 5;
+            \\            print(c);
+            \\        } else {
+            \\            d := b + 5;
+            \\            print(d);
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected = .{ .integer = 15 },
+        },
     };
 
     for (tests) |t| {
