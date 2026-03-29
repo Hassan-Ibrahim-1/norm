@@ -590,7 +590,7 @@ fn testAnalyzeExpr(gpa: Allocator, source: []const u8) ![]const u8 {
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens, true);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
@@ -618,7 +618,7 @@ fn testAnalyzeExprFailure(gpa: Allocator, source: []const u8) !Nir {
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens, true);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
@@ -643,7 +643,7 @@ fn testAnalyze(gpa: Allocator, source: []const u8) ![]const u8 {
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens, true);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
@@ -669,7 +669,7 @@ fn testAnalyzeFailure(gpa: Allocator, source: []const u8) !Nir {
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens, true);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);

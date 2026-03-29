@@ -44,6 +44,8 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [ ] package system
 - [ ] standard library
 - [ ] handle integers that are too big or too small, same for floats, this can be done in parser.
+- [ ] add escape sequences to lexer
+- [ ] proper argument parsing for the compiler, view sema output, compiler output, etc.
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
     * how do i handle user defined types? right now im just thinking of interning them

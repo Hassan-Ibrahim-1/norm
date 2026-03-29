@@ -27,8 +27,6 @@ const Parser = struct {
     panic_mode: bool,
     errors: std.ArrayList(Ast.Diagnostics),
 
-    repl: bool,
-
     const Precedence = enum {
         lowest,
         _or, // or
@@ -117,7 +115,7 @@ const Parser = struct {
         return &parse_rules[@intFromEnum(tt)];
     }
 
-    fn init(arena: Allocator, scratch: Allocator, tokens: []Token, repl: bool) Parser {
+    fn init(arena: Allocator, scratch: Allocator, tokens: []Token) Parser {
         var parser: Parser = .{
             .arena = arena,
             .scratch = scratch,
@@ -128,7 +126,6 @@ const Parser = struct {
             .next = tokens[0],
             .panic_mode = false,
             .errors = .empty,
-            .repl = repl,
         };
         parser.advance();
         return parser;
@@ -263,7 +260,7 @@ const Parser = struct {
     }
 
     fn consumeSemicolon(p: *Parser) void {
-        if (p.repl) {
+        if (builtin.is_test) {
             _ = p.match(.semicolon);
             return;
         }
@@ -432,10 +429,10 @@ const Parser = struct {
 };
 
 /// `arena.deinit` must be called even if expr is null
-pub fn parse(gpa: Allocator, tokens: []Token, repl: bool) Ast {
+pub fn parse(gpa: Allocator, tokens: []Token) Ast {
     var arena: std.heap.ArenaAllocator = .init(gpa);
 
-    var p = Parser.init(arena.allocator(), gpa, tokens, repl);
+    var p = Parser.init(arena.allocator(), gpa, tokens);
 
     var stmts: std.ArrayList(Ast.Stmt) = .empty;
 
@@ -514,7 +511,7 @@ fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
         return error.LexerError;
     }
 
-    var ast = parse(gpa, tokens.tokens, true);
+    var ast = parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
@@ -542,7 +539,7 @@ fn testParseStmts(gpa: Allocator, source: []const u8) ![]const u8 {
         return error.LexerError;
     }
 
-    var ast = parse(gpa, tokens.tokens, true);
+    var ast = parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);

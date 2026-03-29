@@ -21,6 +21,7 @@ pub fn main() !void {
     defer std.process.argsFree(alloc, args);
 
     const stdin = std.fs.File.stdin();
+    _ = stdin; // autofix
 
     var stdout_buf: [1024]u8 = undefined;
     var stdout_w = std.fs.File.stdout().writer(&stdout_buf);
@@ -48,20 +49,17 @@ pub fn main() !void {
             try stderr.print("usage: norm -S [file]\n", .{});
             try stderr.flush();
         } else {
-            try dumpChunk(alloc, args[file_idx], stdout, stderr);
+            try dumpChunk(alloc, args[file_idx], stderr);
         }
-    } else if (args.len > 2) {
-        try stderr.print("usage: norm [file]\n", .{});
-        try stderr.flush();
     } else if (args.len == 2) {
         try runFile(alloc, args[1], stdout, stderr);
     } else {
-        try repl(alloc, stdout, stderr, stdin);
+        try stderr.print("usage: norm [file]\n", .{});
+        try stderr.flush();
     }
 }
 
-fn dumpChunk(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !void {
-    _ = stdout; // autofix
+fn dumpChunk(gpa: Allocator, path: []const u8, stderr: *Io.Writer) !void {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
@@ -79,7 +77,7 @@ fn dumpChunk(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.W
         return;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens, false);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         debug.reportErrors(ast.errors, path, source);
@@ -121,7 +119,7 @@ fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Wri
         return;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens, false);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         debug.reportErrors(ast.errors, path, source);
@@ -146,65 +144,6 @@ fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Wri
     defer vm.deinit();
 
     _ = try vm.interpret(&chunk);
-}
-
-fn repl(gpa: Allocator, stdout: *Io.Writer, stderr: *Io.Writer, stdin: std.fs.File) !void {
-    while (true) {
-        var line_buf: [1000]u8 = undefined;
-        _ = try stdout.writeAll("> ");
-        try stdout.flush();
-        defer {
-            stderr.flush() catch unreachable;
-            stdout.flush() catch unreachable;
-        }
-
-        const len = try stdin.read(&line_buf);
-        if (len == 0) {
-            try stdout.writeAll("\n");
-            break;
-        }
-        const line = line_buf[0..len];
-
-        var lexer = Lexer.init(line);
-        var tokens = lexer.scanTokens(gpa);
-        defer tokens.deinit(gpa);
-        if (tokens.errors.len > 0) {
-            for (tokens.errors) |diag| {
-                try stderr.print("{s}\n", .{diag.error_msg});
-            }
-            continue;
-        }
-
-        var ast = parser.parse(gpa, tokens.tokens, true);
-        defer ast.arena.deinit();
-        if (ast.errors.len > 0) {
-            for (ast.errors) |diag| {
-                try stderr.print("{s}\n", .{diag.error_msg});
-            }
-            continue;
-        }
-
-        var nir = sema.analyze(gpa, &ast);
-        defer nir.deinit();
-        if (nir.errors.len > 0) {
-            for (nir.errors) |diag| {
-                try stderr.print("{s}\n", .{diag.error_msg});
-            }
-            continue;
-        }
-        const stmts = debug.printStmts(gpa, nir.stmts);
-        defer gpa.free(stmts);
-        try stderr.print("{s}\n", .{stmts});
-
-        var chunk = compiler.compile(gpa, &nir);
-        defer chunk.deinit();
-
-        var vm = Vm.init(gpa, stdout, stderr);
-        defer vm.deinit();
-
-        const value = try vm.interpret(&chunk);
-        try stdout.print("{f}\n", .{value});
-    }
 }
 
 test {

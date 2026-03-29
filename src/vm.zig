@@ -382,7 +382,7 @@ fn testRun(
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens, true);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
@@ -424,7 +424,7 @@ fn testRunNoFree(
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens, true);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
@@ -455,7 +455,7 @@ fn testRunPrint(gpa: Allocator, source: []const u8) ![]const u8 {
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens, true);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);

@@ -589,7 +589,7 @@ fn testCompile(gpa: Allocator, source: []const u8) !Chunk {
         return error.LexerError;
     }
 
-    var ast = parser.parse(gpa, tokens.tokens, true);
+    var ast = parser.parse(gpa, tokens.tokens);
     defer ast.arena.deinit();
     if (ast.errors.len > 0) {
         dbg("ast.errors", ast.errors);
