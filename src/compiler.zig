@@ -277,7 +277,11 @@ pub const Compiler = struct {
                     c.statement(block_stmt);
                 }
             },
-            .var_assign => @panic("todo"),
+            .var_assign => |va| {
+                const sym = c.findSym(va.ident.lexeme);
+                c.expression(va.value);
+                c.emitStore(@intCast(sym.stack_slot), va.ident.line);
+            },
             .if_stmt => |if_stmt| {
                 const has_branches = if_stmt.else_block != null or if_stmt.else_if_blocks.len != 0;
 
