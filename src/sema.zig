@@ -1833,6 +1833,272 @@ test "variable assignment" {
             \\}
             ,
         },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    mut y := 5;
+            \\    x = y;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    mut y: int = 5;
+            \\    x = y:int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    {
+            \\        x = 5;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    {
+            \\    x = 5;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    if true {
+            \\        x = 5;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    if true {
+            \\    x = 5;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    if false {
+            \\        x = 5;
+            \\    } else {
+            \\        x = 3;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    if false {
+            \\    x = 5;
+            \\} else {
+            \\    x = 3;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    if false {
+            \\        x = 5;
+            \\    } else if true {
+            \\        x = 3;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    if false {
+            \\    x = 5;
+            \\} else if true {
+            \\    x = 3;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    if false {
+            \\        x = 5;
+            \\    } else if false {
+            \\        x = 3;
+            \\    } else {
+            \\        x = 7;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    if false {
+            \\    x = 5;
+            \\} else if false {
+            \\    x = 3;
+            \\} else {
+            \\    x = 7;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    {
+            \\        mut y := 5;
+            \\        x = y;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    {
+            \\    mut y: int = 5;
+            \\    x = y:int;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    mut y := 5;
+            \\    x = y + 2;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    mut y: int = 5;
+            \\    x = (y:int + 2):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    mut y := 5;
+            \\    y = x + 2;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    mut y: int = 5;
+            \\    y = (x:int + 2):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    mut y := 5;
+            \\    mut z := 3;
+            \\    x = y + z;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    mut y: int = 5;
+            \\    mut z: int = 3;
+            \\    x = (y:int + z:int):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    x = x + 1;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    x = (x:int + 1):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut a := 1.5;
+            \\    mut b := 2.5;
+            \\    a = b;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut a: float = 1.500;
+            \\    mut b: float = 2.500;
+            \\    a = b:float;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    mut y := 5;
+            \\    if x > y {
+            \\        x = y;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    mut y: int = 5;
+            \\    if (x:int > y:int):bool {
+            \\    x = y:int;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    if true {
+            \\        mut y := 5;
+            \\        x = y;
+            \\    } else {
+            \\        x = 3;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    if true {
+            \\    mut y: int = 5;
+            \\    x = y:int;
+            \\} else {
+            \\    x = 3;
+            \\}
+            \\}
+            ,
+        },
     };
 
     for (tests) |t| {
@@ -1875,6 +2141,138 @@ test "variable assignment failure" {
             \\{
             \\    mut x := 10;
             \\    x = false;
+            \\}
+            ,
+            .error_msg = "Expected int got bool",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    if true {
+            \\        x = false;
+            \\    }
+            \\}
+            ,
+            .error_msg = "Expected int got bool",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    if false {
+            \\        x = 5;
+            \\    } else {
+            \\        x = false;
+            \\    }
+            \\}
+            ,
+            .error_msg = "Expected int got bool",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    if false {
+            \\        x = 5;
+            \\    } else if true {
+            \\        x = false;
+            \\    }
+            \\}
+            ,
+            .error_msg = "Expected int got bool",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    {
+            \\        x = false;
+            \\    }
+            \\}
+            ,
+            .error_msg = "Expected int got bool",
+        },
+        .{
+            .source =
+            \\{
+            \\    {
+            \\        mut x := 10;
+            \\    }
+            \\    x = 5;
+            \\}
+            ,
+            .error_msg = "Undefined variable x",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    mut y := 5;
+            \\    x = y;
+            \\    z = 3;
+            \\}
+            ,
+            .error_msg = "Undefined variable z",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    {
+            \\        mut y := 5;
+            \\        y = 3;
+            \\    }
+            \\    y = 7;
+            \\}
+            ,
+            .error_msg = "Undefined variable y",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    if x > 5 {
+            \\        mut y := 5;
+            \\    }
+            \\    y = 3;
+            \\}
+            ,
+            .error_msg = "Undefined variable y",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    mut y := 5;
+            \\    mut z := 3;
+            \\    x = z;
+            \\    w = 1;
+            \\}
+            ,
+            .error_msg = "Undefined variable w",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    mut x := 5;
+            \\    x = 3;
+            \\}
+            ,
+            .error_msg = "Variable x is already defined",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    if false {
+            \\        x = 5;
+            \\    } else if false {
+            \\        x = 3;
+            \\    } else {
+            \\        x = false;
+            \\    }
             \\}
             ,
             .error_msg = "Expected int got bool",
