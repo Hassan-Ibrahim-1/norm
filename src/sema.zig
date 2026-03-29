@@ -152,7 +152,7 @@ const Sema = struct {
                             s.analyzeTypeExpr(type_expr)
                         else
                             .n_invalid;
-                    const already_exists = s.sym_table.register(vd.ident.lexeme, var_type);
+                    const already_exists = s.sym_table.register(vd.ident.lexeme, var_type, vd.mutable);
                     if (already_exists) {
                         s.redefinedVariable(vd.ident);
                     }
@@ -195,20 +195,25 @@ const Sema = struct {
                 return .{ .expression = .{ .expr = nir_expr } };
             },
             .var_decl => |vd| {
-                const sym = s.sym_table.findOrRegister(vd.ident.lexeme) orelse {
+                const sym = s.sym_table.findOrRegister(vd.ident.lexeme, vd.mutable) orelse {
                     s.redefinedVariable(vd.ident);
                     return .invalid;
                 };
 
                 const value =
                     if (vd.value) |v|
-                        s.expectTypeAutoCast(s.expression(v), sym.type)
+                        s.expectTypeTryCast(s.expression(v), sym.type)
                     else
                         @panic("todo: zero values");
                 if (value == null) return .invalid;
                 if (sym.type == .n_invalid) sym.type = value.?.type;
 
-                return .{ .var_decl = .{ .ident = vd.ident, .value = value.?, .type = sym.type } };
+                return .{ .var_decl = .{
+                    .ident = vd.ident,
+                    .value = value.?,
+                    .type = sym.type,
+                    .mutable = vd.mutable,
+                } };
             },
             .print => |p| {
                 const nir_expr = s.expression(p.expr);
@@ -262,7 +267,32 @@ const Sema = struct {
                     },
                 };
             },
-            .var_assign => @panic("todo"),
+            .var_assign => |va| {
+                if (s.sym_table.current_scope.level == .top) {
+                    s.globalAssignErr(va.ident);
+                    return .invalid;
+                }
+
+                const sym = s.sym_table.tryFind(va.ident.lexeme) orelse {
+                    s.undefinedVariable(va.ident);
+                    return .invalid;
+                };
+                if (!sym.mutable) {
+                    s.immutableVarErr(va.ident);
+                    return .invalid;
+                }
+
+                const nir_value = s.expression(va.value);
+                const value = s.expectTypeTryCast(nir_value, sym.type);
+                if (value == null) return .invalid;
+
+                return .{
+                    .var_assign = .{
+                        .ident = va.ident,
+                        .value = value.?,
+                    },
+                };
+            },
         }
     }
 
@@ -303,7 +333,7 @@ const Sema = struct {
         return null;
     }
 
-    fn expectTypeAutoCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
+    fn expectTypeTryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
         if (expr.type == target or target == .n_invalid) return expr;
         const casted = s.tryCast(expr, target) orelse {
             s.reportError(expr, "Expected {f} got {f}", .{ target, expr.type });
@@ -441,7 +471,10 @@ const Sema = struct {
     }
 
     fn identifier(s: *Sema, i: *Ast.Expr.Identifier) *Nir.Expr {
-        const sym = s.sym_table.tryFind(i.ident.lexeme) orelse return s.undefinedVariable(i.ident);
+        const sym = s.sym_table.tryFind(i.ident.lexeme) orelse {
+            s.undefinedVariable(i.ident);
+            return s.invalid_expr;
+        };
         if (sym.type == .n_invalid and sym.scope.level == .top) {
             return s.useBeforeDefinition(i.ident);
         }
@@ -449,9 +482,8 @@ const Sema = struct {
         return makeIdentifier(s.arena, i.ident, sym.scope, sym.type);
     }
 
-    fn undefinedVariable(s: *Sema, name: Token) *Nir.Expr {
+    fn undefinedVariable(s: *Sema, name: Token) void {
         s.reportErrorLine(name.line, "Undefined variable {s}", .{name.lexeme});
-        return s.invalid_expr;
     }
 
     fn redefinedVariable(s: *Sema, name: Token) void {
@@ -469,6 +501,23 @@ const Sema = struct {
             .{name.lexeme},
         );
         return s.invalid_expr;
+    }
+
+    fn immutableVarErr(s: *Sema, name: Token) void {
+        // TODO: add hint here to declare with 'mut'
+        s.reportErrorLine(
+            name.line,
+            "Variable {s} is not declared as mutable.",
+            .{name.lexeme},
+        );
+    }
+
+    fn globalAssignErr(s: *Sema, name: Token) void {
+        s.reportErrorLine(
+            name.line,
+            "Variable assignments are not allowed in the global scope.",
+            .{},
+        );
     }
 
     fn literal(s: *Sema, l: *Ast.Expr.Literal) *Nir.Expr {
@@ -1112,6 +1161,51 @@ test "variable declaration - type inference" {
     }
 }
 
+test "mut variable declaration" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "mut x: int = 10;",
+            .expected = "mut x: int = 10;",
+        },
+        .{
+            .source = "mut x: string = \"hey\";",
+            .expected = "mut x: string = \"hey\";",
+        },
+        .{
+            .source = "mut x := 10;",
+            .expected = "mut x: int = 10;",
+        },
+        .{
+            .source = "mut x := 10.0;",
+            .expected = "mut x: float = 10.000;",
+        },
+        .{
+            .source = "mut x := true;",
+            .expected = "mut x: bool = true;",
+        },
+        .{
+            .source = "mut x := \"hey\";",
+            .expected = "mut x: string = \"hey\";",
+        },
+        .{
+            .source = "mut x := 10 + 2;",
+            .expected = "mut x: int = (10 + 2):int;",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
 test "variable declaration - already defined" {
     const gpa = testing.allocator;
     const tests: []const struct {
@@ -1120,6 +1214,37 @@ test "variable declaration - already defined" {
     } = &.{
         .{
             .source = "x := 10; x := true",
+            .error_msg = "Variable x is already defined",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
+    }
+}
+
+test "mut variable declaration - already defined" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{
+            .source = "mut x := 10; x := true",
+            .error_msg = "Variable x is already defined",
+        },
+        .{
+            .source = "x := 10; mut x := true",
+            .error_msg = "Variable x is already defined",
+        },
+        .{
+            .source = "mut x := 10; mut x := true",
             .error_msg = "Variable x is already defined",
         },
     };
@@ -1641,6 +1766,129 @@ test "if statements" {
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "variable assignment" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    x = 5;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    x = 5;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    y := 5;
+            \\    x = y + 3;
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    mut x: int = 10;
+            \\    y: int = 5;
+            \\    x = (y:int + 3):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\mut x := 10;
+            \\{
+            \\    x = 3;   
+            \\}
+            ,
+            .expected =
+            \\mut x: int = 10;
+            \\{
+            \\    x = 3;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    x = 3;   
+            \\}
+            \\mut x := 10;
+            ,
+            .expected =
+            \\mut x: int = 10;
+            \\{
+            \\    x = 3;
+            \\}
+            ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "variable assignment failure" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{
+            .source = "mut x := 10; x = 1;",
+            .error_msg = "Variable assignments are not allowed in the global scope.",
+        },
+        .{
+            .source = "{x = 10;}",
+            .error_msg = "Undefined variable x",
+        },
+        .{
+            .source = "x := 3; { x = 10; }",
+            .error_msg = "Variable x is not declared as mutable.",
+        },
+        .{
+            .source = "{ x = 10; } x := 3;",
+            .error_msg = "Variable x is not declared as mutable.",
+        },
+        .{
+            .source = " { x := 3; x = 10; }",
+            .error_msg = "Variable x is not declared as mutable.",
+        },
+        .{
+            .source =
+            \\{
+            \\    mut x := 10;
+            \\    x = false;
+            \\}
+            ,
+            .error_msg = "Expected int got bool",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
     }
 }
 

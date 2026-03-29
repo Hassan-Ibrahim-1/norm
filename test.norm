@@ -1,5 +1,4 @@
-if 1 > 2 {
-    print("if stmt");
-} else if 2 > 2 {
-    print("else if stmt");
+{
+    mut x := 10;
+    x = false;
 }

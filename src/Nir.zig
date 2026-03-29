@@ -28,6 +28,7 @@ pub const Scope = struct {
 
 pub const Symbol = struct {
     type: NormType,
+    mutable: bool,
     scope: *Scope,
     stack_slot: usize,
 };
@@ -73,20 +74,21 @@ pub const SymbolTable = struct {
     }
 
     /// returns true if the symbol already exists
-    pub fn register(st: *SymbolTable, name: []const u8, ty: NormType) bool {
+    pub fn register(st: *SymbolTable, name: []const u8, ty: NormType, mutable: bool) bool {
         if (st.symDefined(name, st.current_scope)) return true;
 
-        st.registerSym(name, ty);
+        st.registerSym(name, ty, mutable);
 
         return false;
     }
 
-    fn registerSym(st: *SymbolTable, name: []const u8, ty: NormType) void {
+    fn registerSym(st: *SymbolTable, name: []const u8, ty: NormType, mutable: bool) void {
         switch (st.current_scope.level) {
             .top => {
                 const stack_slot = st.top.count();
                 const sym: Symbol = .{
                     .type = ty,
+                    .mutable = mutable,
                     .scope = st.top_scope,
                     .stack_slot = stack_slot,
                 };
@@ -99,6 +101,7 @@ pub const SymbolTable = struct {
                     .type = ty,
                     .scope = st.current_scope,
                     .stack_slot = stack_slot,
+                    .mutable = mutable,
                 };
 
                 const locals = st.locals.getPtr(st.current_scope).?;
@@ -166,11 +169,11 @@ pub const SymbolTable = struct {
 
     /// If the return value is null then it means that the symbol
     /// has already been defined.
-    pub fn findOrRegister(st: *SymbolTable, name: []const u8) ?*Symbol {
+    pub fn findOrRegister(st: *SymbolTable, name: []const u8, mutable: bool) ?*Symbol {
         if (st.current_scope.level == .top) {
             return st.tryFind(name);
         }
-        const already_exists = st.register(name, .n_invalid);
+        const already_exists = st.register(name, .n_invalid, mutable);
         if (already_exists) return null;
         return st.tryFind(name).?;
     }
@@ -239,11 +242,14 @@ pub const Stmt = union(enum) {
     pub const VarDecl = struct {
         ident: Token,
         type: NormType,
-        // sema could possibly automatically set this to the zero value
+        // TODO: zero values
         value: *Expr,
+        // I don't think this field is necessary, I just use it for formatting and that's it.
+        mutable: bool,
 
         pub fn format(vd: *const Stmt.VarDecl, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{s}: {f} = {f};", .{ vd.ident.lexeme, vd.type, vd.value });
+            const mut = if (vd.mutable) "mut " else "";
+            try w.print("{s}{s}: {f} = {f};", .{ mut, vd.ident.lexeme, vd.type, vd.value });
         }
     };
 

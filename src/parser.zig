@@ -137,6 +137,10 @@ const Parser = struct {
                 p.advance();
                 return p.varDecl(false);
             }
+            if (p.checkNext(.equal)) {
+                p.advance();
+                return p.varAssign();
+            }
         } else if (p.match(.kw_mut)) {
             p.consume(.identifier, "Expect identifier after mut");
             return p.varDecl(true);
@@ -259,6 +263,21 @@ const Parser = struct {
                 .type_expr = type_expr,
                 .value = value,
                 .mutable = mutable,
+            },
+        };
+    }
+
+    fn varAssign(p: *Parser) Ast.Stmt {
+        const ident = p.previous;
+        // we know that there is an equal token next so we don't have to check
+        p.advance();
+        const value = p.expression(.lowest);
+        p.consumeSemicolon();
+
+        return .{
+            .var_assign = .{
+                .ident = ident,
+                .value = value,
             },
         };
     }
@@ -1154,6 +1173,35 @@ test "mut var decl" {
         .{
             .source = "mut x: string = \"Hello, \" + \"World\";",
             .expected = "mut x: string = (\"Hello, \" + \"World\");",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testParseStmts(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "var assign" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "x = 10;",
+            .expected = "x = 10;",
+        },
+        .{
+            .source = "x = 10 + 2;",
+            .expected = "x = (10 + 2);",
+        },
+        .{
+            .source = "x = false;",
+            .expected = "x = false;",
         },
     };
 
