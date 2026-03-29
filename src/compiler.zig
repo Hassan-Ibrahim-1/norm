@@ -289,10 +289,8 @@ pub const Compiler = struct {
                 const if_false_jump = c.emitJump(.op_jump_if_false, if_stmt.token.line);
 
                 c.statement(.{ .block = if_stmt.then_block });
-                const if_true_jump = if (has_branches)
-                    c.emitJump(.op_jump, if_stmt.then_block.end_token.line)
-                else
-                    0;
+                const if_true_jump =
+                    if (has_branches) c.emitJump(.op_jump, if_stmt.then_block.end_token.line) else 0;
 
                 c.patchJump(if_false_jump);
 
@@ -307,10 +305,8 @@ pub const Compiler = struct {
                     const else_if_false_jump = c.emitJump(.op_jump_if_false, else_if.token.line);
 
                     c.statement(.{ .block = else_if.then_block });
-                    else_if_true_jumps[i] = if (last_branch)
-                        0
-                    else
-                        c.emitJump(.op_jump, else_if.then_block.end_token.line);
+                    else_if_true_jumps[i] =
+                        if (last_branch) 0 else c.emitJump(.op_jump, else_if.then_block.end_token.line);
 
                     c.patchJump(else_if_false_jump);
                 }

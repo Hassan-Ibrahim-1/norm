@@ -27,7 +27,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] variable declartions + statements + scopes
 - [x] if statements
 - [x] update disassembleInstruction in debug to actually work with new opcode
-- [ ] variable mutability + assignment
+- [x] variable mutability + assignment
 - [ ] c loops, infinite loops, break, continue
 - [ ] rewrite logical operators to have short circuit behavior
 - [ ] my allocations in sema are absolutely stupid. take for example returning errors as an owned slice
