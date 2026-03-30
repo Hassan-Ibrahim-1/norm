@@ -46,6 +46,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [ ] handle integers that are too big or too small, same for floats, this can be done in parser.
 - [ ] add escape sequences to lexer
 - [ ] proper argument parsing for the compiler, view sema output, compiler output, etc.
+- [ ] lang ref + std documentation
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
     * how do i handle user defined types? right now im just thinking of interning them
@@ -61,7 +62,6 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 with both floats and integers
 - [ ] Think about debug info, instead of each chunk having line numbers there
 could be pointers to a debug info table. Would allow variable/function names, types etc.
-- [ ] think about garbage collection
 
 #### Notes for next session
 
@@ -109,6 +109,9 @@ Making a custom engine and doing some small demo in it would be nice. Radiance
 cascades seems interesting: [radiance cascades](https://radiance-cascades.com/)
 Since zig compiles to wasm, I could theoretically get this language running in a web browser.
 It'd be awesome if I could get an engine running in a browser.
+
+Another thing that would be cool is to statically generate norm's language reference + std docs
+using norm itself. That would also be a nice test for the language.
 
 #### Language Ideas
 
