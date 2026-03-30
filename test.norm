@@ -1,10 +1,11 @@
 {
     mut x := 10;
     y := 4;
-    x = x + y;
+    x += y;
     if x == 3 {
         print(x);
     } else {
         print("x is not 3");
     }
+    print(x + 3);
 }

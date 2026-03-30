@@ -133,11 +133,13 @@ const Parser = struct {
 
     fn statement(p: *Parser) Ast.Stmt {
         if (p.check(.identifier)) {
-            if (p.checkNextEither(.colon, .colon_equal)) {
+            if (p.checkNextEither(&.{ .colon, .colon_equal })) {
                 p.advance();
                 return p.varDecl(false);
-            }
-            if (p.checkNext(.equal)) {
+            } else if (p.checkNextEither(&.{ .plus_equal, .minus_equal, .star_equal, .slash_equal })) {
+                p.advance();
+                return p.varAssignEql();
+            } else if (p.checkNext(.equal)) {
                 p.advance();
                 return p.varAssign();
             }
@@ -272,6 +274,31 @@ const Parser = struct {
         // we know that there is an equal token next so we don't have to check
         p.advance();
         const value = p.expression(.lowest);
+        p.consumeSemicolon();
+
+        return .{
+            .var_assign = .{
+                .ident = ident,
+                .value = value,
+            },
+        };
+    }
+
+    fn varAssignEql(p: *Parser) Ast.Stmt {
+        const ident = p.previous;
+        p.advance();
+
+        const operator: Token = switch (p.previous.type) {
+            .plus_equal => .{ .type = .plus, .lexeme = "+", .line = p.previous.line },
+            .minus_equal => .{ .type = .minus, .lexeme = "-", .line = p.previous.line },
+            .star_equal => .{ .type = .star, .lexeme = "*", .line = p.previous.line },
+            .slash_equal => .{ .type = .slash, .lexeme = "/", .line = p.previous.line },
+            else => unreachable,
+        };
+
+        const right = p.expression(.lowest);
+        const left = makeIdentifier(p.arena, ident);
+        const value = makeBinary(p.arena, left, operator, right);
         p.consumeSemicolon();
 
         return .{
@@ -421,8 +448,11 @@ const Parser = struct {
         return p.next.type == ty;
     }
 
-    fn checkNextEither(p: *Parser, a: Token.Type, b: Token.Type) bool {
-        return p.next.type == a or p.next.type == b;
+    fn checkNextEither(p: *Parser, comptime types: []const Token.Type) bool {
+        for (types) |ty| {
+            if (p.next.type == ty) return true;
+        }
+        return false;
     }
 
     fn match(p: *Parser, ty: Token.Type) bool {
@@ -1202,6 +1232,103 @@ test "var assign" {
         .{
             .source = "x = false;",
             .expected = "x = false;",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testParseStmts(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "var assign eql" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "x += 10;",
+            .expected = "x = (x + 10);",
+        },
+        .{
+            .source = "x -= 10;",
+            .expected = "x = (x - 10);",
+        },
+        .{
+            .source = "x *= 10;",
+            .expected = "x = (x * 10);",
+        },
+        .{
+            .source = "x /= 10;",
+            .expected = "x = (x / 10);",
+        },
+        .{
+            .source = "x += 10 + 2;",
+            .expected = "x = (x + (10 + 2));",
+        },
+        .{
+            .source = "x -= 10 * 2;",
+            .expected = "x = (x - (10 * 2));",
+        },
+        .{
+            .source = "x *= 10 + 5;",
+            .expected = "x = (x * (10 + 5));",
+        },
+        .{
+            .source = "x /= 10 - 2;",
+            .expected = "x = (x / (10 - 2));",
+        },
+        .{
+            .source = "x += (10 + 2);",
+            .expected = "x = (x + (10 + 2));",
+        },
+        .{
+            .source = "x *= (10 + 5) * 2;",
+            .expected = "x = (x * ((10 + 5) * 2));",
+        },
+        .{
+            .source = "x += y + z;",
+            .expected = "x = (x + (y + z));",
+        },
+        .{
+            .source = "x -= y * z;",
+            .expected = "x = (x - (y * z));",
+        },
+        .{
+            .source = "x *= y + z * 2;",
+            .expected = "x = (x * (y + (z * 2)));",
+        },
+        .{
+            .source = "x /= y - z + 10;",
+            .expected = "x = (x / ((y - z) + 10));",
+        },
+        .{
+            .source = "x += 10 + 2 * 3;",
+            .expected = "x = (x + (10 + (2 * 3)));",
+        },
+        .{
+            .source = "x -= 10 * 2 + 3;",
+            .expected = "x = (x - ((10 * 2) + 3));",
+        },
+        .{
+            .source = "x *= (10 + 2) * (3 + 4);",
+            .expected = "x = (x * ((10 + 2) * (3 + 4)));",
+        },
+        .{
+            .source = "x /= (10 - 2) / (4 + 1);",
+            .expected = "x = (x / ((10 - 2) / (4 + 1)));",
+        },
+        .{
+            .source = "x += 1.5 + 2.5;",
+            .expected = "x = (x + (1.500 + 2.500));",
+        },
+        .{
+            .source = "x *= 2.0 * y;",
+            .expected = "x = (x * (2.000 * y));",
         },
     };
 
