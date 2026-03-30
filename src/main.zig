@@ -66,6 +66,8 @@ fn dumpChunk(gpa: Allocator, path: []const u8, stderr: *Io.Writer) !void {
     const source = try file.readToEndAlloc(gpa, 1_000_000);
     defer gpa.free(source);
 
+    try stderr.print("{s}\n\n", .{source});
+
     var lexer = Lexer.init(source);
     var tokens = lexer.scanTokens(gpa);
     defer tokens.deinit(gpa);
@@ -90,10 +92,6 @@ fn dumpChunk(gpa: Allocator, path: []const u8, stderr: *Io.Writer) !void {
         debug.reportErrors(nir.errors, path, source);
         return;
     }
-
-    const stmts = debug.printStmts(gpa, nir.stmts);
-    defer gpa.free(stmts);
-    try stderr.print("{s}\n\n", .{stmts});
 
     var chunk = compiler.compile(gpa, &nir);
     defer chunk.deinit();
