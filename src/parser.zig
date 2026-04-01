@@ -152,8 +152,115 @@ const Parser = struct {
             return p.ifStmt();
         } else if (p.match(.kw_print)) {
             return p.printStmt();
+        } else if (p.match(.kw_for)) {
+            return p.forStmt();
         }
         return p.expressionStmt();
+    }
+
+    /// If null there was no increment
+    fn forInit(p: *Parser) union(enum) {
+        cond: *Ast.Expr,
+        init: ?Ast.Stmt.For.InitializerStmt,
+    } {
+        if (p.match(.semicolon)) return .{ .init = null };
+
+        if (p.check(.identifier)) {
+            if (p.checkNextEither(&.{ .colon, .colon_equal })) {
+                p.advance();
+                return .{ .init = .{ .var_decl = p.varDecl(false).var_decl } };
+            } else if (p.checkNextEither(&.{ .plus_equal, .minus_equal, .star_equal, .slash_equal })) {
+                p.advance();
+                return .{ .init = .{ .var_assign = p.varAssignEql().var_assign } };
+            } else if (p.checkNext(.equal)) {
+                p.advance();
+                return .{ .init = .{ .var_assign = p.varAssign().var_assign } };
+            }
+        } else if (p.match(.kw_mut)) {
+            p.consume(.identifier, "Expect identifier after mut");
+            return .{ .init = .{ .var_decl = p.varDecl(true).var_decl } };
+        }
+        const expr = p.expression(.lowest);
+        if (p.match(.semicolon)) {
+            return .{ .init = .{ .expr = .{ .expr = expr } } };
+        }
+        return .{ .cond = expr };
+    }
+
+    fn forIncr(p: *Parser) ?Ast.Stmt.For.IncrementStmt {
+        if (p.check(.left_brace)) return null;
+
+        if (p.check(.identifier)) {
+            if (p.checkNextEither(&.{ .plus_equal, .minus_equal, .star_equal, .slash_equal })) {
+                p.advance();
+                return .{ .var_assign = p.varAssignEql().var_assign };
+            } else if (p.checkNext(.equal)) {
+                p.advance();
+                return .{ .var_assign = p.varAssign().var_assign };
+            }
+        }
+        const expr = p.expression(.lowest);
+        return .{ .expr = .{ .expr = expr } };
+    }
+
+    fn infiniteFor(p: *Parser, for_token: Token) Ast.Stmt {
+        p.advance();
+        const block = p.blockStmt().block;
+
+        return .{
+            .infinite_for = .{
+                .block = block,
+                .token = for_token,
+            },
+        };
+    }
+
+    fn forStmt(p: *Parser) Ast.Stmt {
+        const for_token = p.previous;
+        if (p.check(.left_brace)) {
+            return p.infiniteFor(for_token);
+        }
+        const init_or_cond = p.forInit();
+        switch (init_or_cond) {
+            .cond => |cond| {
+                p.consume(.left_brace, "Expect '{' after condition");
+                const block = p.blockStmt().block;
+                return .{
+                    .condition_for = .{
+                        .token = for_token,
+                        .block = block,
+                        .condition = cond,
+                    },
+                };
+            },
+            .init => |initializer| {
+                const condition = p.expression(.lowest);
+                p.consumeSemicolon();
+                const increment = p.forIncr();
+                p.consume(.left_brace, "Expect '{' after for");
+                const block = p.blockStmt().block;
+
+                if (initializer == null and increment == null) {
+                    return .{
+                        .condition_for = .{
+                            .token = for_token,
+                            .block = block,
+                            .condition = condition,
+                        },
+                    };
+                }
+
+                return .{
+                    .for_stmt = .{
+                        .token = for_token,
+                        .initializer = initializer,
+                        .condition = condition,
+                        .increment = increment,
+                        .block = block,
+                    },
+                };
+            },
+        }
     }
 
     fn ifStmt(p: *Parser) Ast.Stmt {
@@ -1329,6 +1436,132 @@ test "var assign eql" {
         .{
             .source = "x *= 2.0 * y;",
             .expected = "x = (x * (2.000 * y));",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testParseStmts(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "for loops" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\for {
+            \\}
+            ,
+            .expected =
+            \\for {
+            \\}
+            ,
+        },
+
+        .{
+            .source =
+            \\for mut i := 10; i < 10; i += 1 {
+            \\}
+            ,
+            .expected =
+            \\for mut i := 10; (i < 10); i = (i + 1); {
+            \\}
+            ,
+        },
+
+        .{
+            .source =
+            \\for i < 10 {
+            \\}
+            ,
+            .expected =
+            \\for (i < 10) {
+            \\}
+            ,
+        },
+
+        .{
+            .source =
+            \\for ;i < 10; {
+            \\}
+            ,
+            .expected =
+            \\for (i < 10) {
+            \\}
+            ,
+        },
+
+        .{
+            .source =
+            \\for mut i := 0; i < 10; {
+            \\}
+            ,
+            .expected =
+            \\for mut i := 0; (i < 10); {
+            \\}
+            ,
+        },
+
+        .{
+            .source =
+            \\for ;i < 10; i += 1 {
+            \\}
+            ,
+            .expected =
+            \\for (i < 10); i = (i + 1); {
+            \\}
+            ,
+        },
+
+        .{
+            .source =
+            \\for i = 0; i < 10; i += 1 {
+            \\}
+            ,
+            .expected =
+            \\for i = 0; (i < 10); i = (i + 1); {
+            \\}
+            ,
+        },
+
+        .{
+            .source =
+            \\for i = 0; i < 10; i = i + 1 {
+            \\}
+            ,
+            .expected =
+            \\for i = 0; (i < 10); i = (i + 1); {
+            \\}
+            ,
+        },
+
+        .{
+            .source =
+            \\for 2 + 3; i < 10; i = i + 1 {
+            \\}
+            ,
+            .expected =
+            \\for (2 + 3); (i < 10); i = (i + 1); {
+            \\}
+            ,
+        },
+
+        .{
+            .source =
+            \\for 2 + 3; i < 10; (3 + 2) {
+            \\}
+            ,
+            .expected =
+            \\for (2 + 3); (i < 10); (3 + 2); {
+            \\}
+            ,
         },
     };
 

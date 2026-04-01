@@ -28,7 +28,9 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] if statements
 - [x] update disassembleInstruction in debug to actually work with new opcode
 - [x] variable mutability + assignment
+- [ ] test loop failure cases in parser
 - [ ] c loops, infinite loops, break, continue
+- [ ] nil expr that doesn't get evaluated at all, just a zero value
 - [ ] rewrite logical operators to have short circuit behavior
 - [ ] my allocations in sema are absolutely stupid. take for example returning errors as an owned slice
 - [ ] sync points at statement boundaries for parser and sema
@@ -161,6 +163,31 @@ index_of := fn (s: string, target: char) ?int {
         }
     }
     return nil
+}
+
+c_loops := fn () {
+    for mut i := 0; i < 3; i += 1 {
+        fmt.println(i);
+    }
+
+    // condition is necessary
+
+    mut j := 0;
+    for ; j < 3; j += 1 { 
+        fmt.println(j);
+    }
+
+    for j < 3 { 
+        fmt.println(j);
+    }
+
+    for ; j < 3 ; { 
+        fmt.println(j);
+    }
+
+    for {
+
+    }
 }
 
 replace_with := fn (s: []mut int, old, new: int) {
