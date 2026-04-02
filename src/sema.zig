@@ -256,6 +256,7 @@ const Sema = struct {
                         s.reportError(nir_condition, "Expected condition to be bool got {f}", .{nir_condition.type});
                         return .invalid;
                     }
+
                     const nir_then_block = s.statement(.{ .block = else_if.then_block }).block;
                     else_if_blocks[i] = .{
                         .token = else_if.token,
@@ -1792,6 +1793,14 @@ test "if statement failure" {
             \\}
             ,
             .error_msg = "Expected condition to be bool got int",
+        },
+        .{
+            .source =
+            \\if false {
+            \\print(2);
+            \\} else if "hey" {}
+            ,
+            .error_msg = "Expected condition to be bool got string",
         },
     };
 
