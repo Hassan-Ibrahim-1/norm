@@ -240,12 +240,23 @@ const Sema = struct {
             },
             .if_stmt => |if_stmt| {
                 const if_condition = s.expression(if_stmt.condition);
+
+                if (if_condition.type != .n_bool) {
+                    s.reportError(if_condition, "Expected condition to be bool got {f}", .{if_condition.type});
+                    return .invalid;
+                }
+
                 const if_then_block = s.statement(.{ .block = if_stmt.then_block }).block;
 
                 const else_if_blocks =
                     s.arena.alloc(Nir.Stmt.If.ElseIf, if_stmt.else_if_blocks.len) catch oom();
                 for (if_stmt.else_if_blocks, 0..) |else_if, i| {
                     const nir_condition = s.expression(else_if.condition);
+                    if (nir_condition.type != .n_bool) {
+                        s.reportError(nir_condition, "Expected condition to be bool got {f}", .{nir_condition.type});
+                        return .invalid;
+                    }
+
                     const nir_then_block = s.statement(.{ .block = else_if.then_block }).block;
                     else_if_blocks[i] = .{
                         .token = else_if.token,
@@ -1766,6 +1777,41 @@ test "if statements" {
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "if statement failure" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\if 2 {
+            \\print(2);
+            \\}
+            ,
+            .error_msg = "Expected condition to be bool got int",
+        },
+        .{
+            .source =
+            \\if false {
+            \\print(2);
+            \\} else if "hey" {}
+            ,
+            .error_msg = "Expected condition to be bool got string",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
     }
 }
 

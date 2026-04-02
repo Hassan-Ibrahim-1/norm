@@ -1,8 +1,8 @@
 {
     mut x := 10;
     y := 4;
-    x += y;
-    if x == 3 {
+    x += 2;
+    if x {
         print(x);
     } else {
         print("x is not 3");
