@@ -2,7 +2,7 @@
     mut x := 10;
     y := 4;
     x += 2;
-    if x {
+    if x == 12.0 {
         print(x);
     } else {
         print("x is not 3");

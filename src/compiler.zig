@@ -29,6 +29,7 @@ pub const OpCode = enum(u8) {
     op_constant_long,
 
     // VM: Pop two constants off the stack and then push one
+
     op_add_int,
     op_subtract_int,
     op_multiply_int,
@@ -294,19 +295,18 @@ pub const Compiler = struct {
 
                 c.patchJump(if_false_jump);
 
-                const else_if_true_jumps =
+                const else_if_jumps =
                     c.scratch.alloc(usize, if_stmt.else_if_blocks.len) catch oom();
-                defer c.scratch.free(else_if_true_jumps);
+                defer c.scratch.free(else_if_jumps);
 
                 for (if_stmt.else_if_blocks, 0..) |else_if, i| {
-                    const last_branch = if_stmt.else_block == null and i == if_stmt.else_if_blocks.len - 1;
-
                     c.expression(else_if.condition);
                     const else_if_false_jump = c.emitJump(.op_jump_if_false, else_if.token.line);
 
                     c.statement(.{ .block = else_if.then_block });
-                    else_if_true_jumps[i] =
-                        if (last_branch) 0 else c.emitJump(.op_jump, else_if.then_block.end_token.line);
+
+                    const last_branch = if_stmt.else_block == null and i == if_stmt.else_if_blocks.len - 1;
+                    else_if_jumps[i] = if (last_branch) 0 else c.emitJump(.op_jump, else_if.then_block.end_token.line);
 
                     c.patchJump(else_if_false_jump);
                 }
@@ -319,11 +319,12 @@ pub const Compiler = struct {
                     c.patchJump(if_true_jump);
                 }
 
-                for (else_if_true_jumps) |jump| {
+                for (else_if_jumps) |jump| {
                     if (jump == 0) continue;
                     c.patchJump(jump);
                 }
             },
+            else => unreachable,
         }
     }
 
@@ -577,9 +578,6 @@ test "basic chunk ops" {
     try testing.expectEqualSlices(Value, &expected_constants, chunk.constants.items);
 }
 
-// TODO:
-test "chunk long instruction" {}
-
 fn testCompile(gpa: Allocator, source: []const u8) !Chunk {
     var l = Lexer.init(source);
     var tokens = l.scanTokens(gpa);
@@ -619,6 +617,8 @@ const TestCaseMinimal = struct {
     expected_code: []const u8,
     expected_constants: []const Value,
 };
+
+// TODO: test "chunk long instruction" {}
 
 test "literals" {
     const gpa = testing.allocator;
@@ -1747,7 +1747,6 @@ test "if statements with variable declarations - scope ends properly" {
                 // d
                 .op_constant, 3,
                 .op_store, 1, 0,
-                // pop a, d (use pop_n since there are 2)
                 .op_pop_n, 2, 0,
                 .op_return,
             }),

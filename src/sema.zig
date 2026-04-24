@@ -11,78 +11,6 @@ const Token = @import("Lexer.zig").Token;
 const Nir = @import("Nir.zig");
 const NormType = Nir.NormType;
 
-fn makeIdentifier(arena: Allocator, ident: Token, scope: *Nir.Scope, ty: NormType) *Nir.Expr {
-    const e = makeExpr(arena);
-    e.* = .{ .kind = .{ .identifier = .{ .ident = ident, .scope = scope } }, .type = ty };
-    return e;
-}
-
-fn makeGrouping(arena: Allocator, grping: *Nir.Expr, paren: Token, ty: NormType) *Nir.Expr {
-    const e = makeExpr(arena);
-    e.* = .{ .kind = .{ .grouping = .{ .paren = paren, .expr = grping } }, .type = ty };
-    return e;
-}
-
-fn makeUnary(arena: Allocator, expr: *Nir.Expr, op: Token, ty: NormType) *Nir.Expr {
-    const e = makeExpr(arena);
-    e.* = .{
-        .kind = .{ .unary = .{ .expr = expr, .operator = op } },
-        .type = ty,
-    };
-    return e;
-}
-
-fn makeCast(arena: Allocator, expr: *Nir.Expr, token: Token, target: NormType) *Nir.Expr {
-    const e = makeExpr(arena);
-    e.* = .{
-        .kind = .{ .cast = .{ .expr = expr, .token = token } },
-        .type = target,
-    };
-    return e;
-}
-
-fn fakeTargetToken(target: NormType, line: u32) Token {
-    return switch (target) {
-        .n_int => .{ .type = .kw_int, .lexeme = "int", .line = line },
-        .n_float => .{ .type = .kw_float, .lexeme = "float", .line = line },
-        else => unreachable,
-    };
-}
-
-fn makeAnonCast(arena: Allocator, expr: *Nir.Expr, target: NormType) *Nir.Expr {
-    const expr_token = expr.token();
-    const target_token = fakeTargetToken(target, expr_token.line);
-    return makeCast(arena, expr, target_token, target);
-}
-
-fn makeBinary(arena: Allocator, left: *Nir.Expr, op: Token, right: *Nir.Expr, ty: NormType) *Nir.Expr {
-    const e = makeExpr(arena);
-    e.* = .{
-        .kind = .{ .binary = .{ .left = left, .operator = op, .right = right } },
-        .type = ty,
-    };
-    return e;
-}
-
-fn makeLiteral(arena: Allocator, value: Nir.Expr.Literal.Value, token: Token, ty: NormType) *Nir.Expr {
-    const e = makeExpr(arena);
-    e.* = .{
-        .kind = .{ .literal = .{ .token = token, .value = value } },
-        .type = ty,
-    };
-    return e;
-}
-
-fn makeInvalid(arena: Allocator) *Nir.Expr {
-    const expr = makeExpr(arena);
-    expr.* = .invalid;
-    return expr;
-}
-
-fn makeExpr(arena: Allocator) *Nir.Expr {
-    return arena.create(Nir.Expr) catch oom();
-}
-
 const Sema = struct {
     arena: Allocator,
     errors: std.ArrayList(Nir.Diagnostics),
@@ -301,6 +229,71 @@ const Sema = struct {
                     .var_assign = .{
                         .ident = va.ident,
                         .value = value.?,
+                    },
+                };
+            },
+
+            .infinite_for => |infinite_for| {
+                const nir_block = s.statement(.{ .block = infinite_for.block }).block;
+                return .{ .infinite_for = .{ .token = infinite_for.token, .block = nir_block } };
+            },
+
+            .condition_for => |condition_for| {
+                const condition = s.expression(condition_for.condition);
+                const nir_block = s.statement(.{ .block = condition_for.block }).block;
+                return .{
+                    .condition_for = .{
+                        .token = condition_for.token,
+                        .condition = condition,
+                        .block = nir_block,
+                    },
+                };
+            },
+
+            .for_stmt => |for_stmt| {
+                const initializer: ?Nir.Stmt.For.InitializerStmt = if (for_stmt.initializer) |i| s: {
+                    const ast_stmt: Ast.Stmt = switch (i) {
+                        .var_assign => |va| .{ .var_assign = va },
+                        .var_decl => |vd| .{ .var_decl = vd },
+                        .expr => |expr| .{ .expression = expr },
+                    };
+                    dbg("ast_stmt", ast_stmt);
+                    const nir_stmt = s.statement(ast_stmt);
+                    dbg("nir_stmt", nir_stmt);
+                    break :s switch (nir_stmt) {
+                        .var_assign => |va| .{ .var_assign = va },
+                        .var_decl => |vd| .{ .var_decl = vd },
+                        .expression => |expr| .{ .expr = expr },
+                        else => unreachable,
+                    };
+                } else null;
+                const condition = s.expression(for_stmt.condition);
+
+                const increment: ?Nir.Stmt.For.IncrementStmt = if (for_stmt.increment) |i| s: {
+                    const ast_stmt: Ast.Stmt = switch (i) {
+                        .var_assign => |va| .{ .var_assign = va },
+                        .expr => |expr| .{ .expression = expr },
+                    };
+                    const nir_stmt = s.statement(ast_stmt);
+                    if (s.errors.items.len > 0) {
+                        dbg("errors", s.errors.items);
+                        @panic("had an error");
+                    }
+                    break :s switch (nir_stmt) {
+                        .var_assign => |va| .{ .var_assign = va },
+                        .expression => |expr| .{ .expr = expr },
+                        else => unreachable,
+                    };
+                } else null;
+                const nir_block = s.statement(.{ .block = for_stmt.block }).block;
+
+                return .{
+                    .for_stmt = .{
+                        .token = for_stmt.token,
+                        .initializer = initializer,
+                        .condition = condition,
+                        .increment = increment,
+                        .block = nir_block,
                     },
                 };
             },
@@ -616,10 +609,6 @@ const Sema = struct {
     }
 };
 
-fn oom() noreturn {
-    @panic("oom");
-}
-
 pub fn analyze(gpa: Allocator, ast: *Ast) Nir {
     if (ast.errors.len > 0) return undefined;
 
@@ -635,6 +624,82 @@ pub fn analyze(gpa: Allocator, ast: *Ast) Nir {
         .stmts = stmts,
         .sym_table = sema.sym_table,
     };
+}
+
+fn oom() noreturn {
+    @panic("oom");
+}
+
+fn makeIdentifier(arena: Allocator, ident: Token, scope: *Nir.Scope, ty: NormType) *Nir.Expr {
+    const e = makeExpr(arena);
+    e.* = .{ .kind = .{ .identifier = .{ .ident = ident, .scope = scope } }, .type = ty };
+    return e;
+}
+
+fn makeGrouping(arena: Allocator, grping: *Nir.Expr, paren: Token, ty: NormType) *Nir.Expr {
+    const e = makeExpr(arena);
+    e.* = .{ .kind = .{ .grouping = .{ .paren = paren, .expr = grping } }, .type = ty };
+    return e;
+}
+
+fn makeUnary(arena: Allocator, expr: *Nir.Expr, op: Token, ty: NormType) *Nir.Expr {
+    const e = makeExpr(arena);
+    e.* = .{
+        .kind = .{ .unary = .{ .expr = expr, .operator = op } },
+        .type = ty,
+    };
+    return e;
+}
+
+fn makeCast(arena: Allocator, expr: *Nir.Expr, token: Token, target: NormType) *Nir.Expr {
+    const e = makeExpr(arena);
+    e.* = .{
+        .kind = .{ .cast = .{ .expr = expr, .token = token } },
+        .type = target,
+    };
+    return e;
+}
+
+fn fakeTargetToken(target: NormType, line: u32) Token {
+    return switch (target) {
+        .n_int => .{ .type = .kw_int, .lexeme = "int", .line = line },
+        .n_float => .{ .type = .kw_float, .lexeme = "float", .line = line },
+        else => unreachable,
+    };
+}
+
+fn makeAnonCast(arena: Allocator, expr: *Nir.Expr, target: NormType) *Nir.Expr {
+    const expr_token = expr.token();
+    const target_token = fakeTargetToken(target, expr_token.line);
+    return makeCast(arena, expr, target_token, target);
+}
+
+fn makeBinary(arena: Allocator, left: *Nir.Expr, op: Token, right: *Nir.Expr, ty: NormType) *Nir.Expr {
+    const e = makeExpr(arena);
+    e.* = .{
+        .kind = .{ .binary = .{ .left = left, .operator = op, .right = right } },
+        .type = ty,
+    };
+    return e;
+}
+
+fn makeLiteral(arena: Allocator, value: Nir.Expr.Literal.Value, token: Token, ty: NormType) *Nir.Expr {
+    const e = makeExpr(arena);
+    e.* = .{
+        .kind = .{ .literal = .{ .token = token, .value = value } },
+        .type = ty,
+    };
+    return e;
+}
+
+fn makeInvalid(arena: Allocator) *Nir.Expr {
+    const expr = makeExpr(arena);
+    expr.* = .invalid;
+    return expr;
+}
+
+fn makeExpr(arena: Allocator) *Nir.Expr {
+    return arena.create(Nir.Expr) catch oom();
 }
 
 const Lexer = @import("Lexer.zig");
@@ -2333,6 +2398,33 @@ test "variable assignment failure" {
 
         try testing.expect(nir.errors.len == 1);
         try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
+    }
+}
+
+test "for loops" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\for mut i := 0; i < 10; i += 1 {
+            \\}
+            ,
+            .expected =
+            \\for mut i: int = 0; (i:int < 10):bool; i = (i:int + 1):int {
+            \\}
+            ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
     }
 }
 

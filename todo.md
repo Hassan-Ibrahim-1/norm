@@ -1,5 +1,8 @@
 ## Norm
 
+The obvious way of doing things should be the right way
+of doings things. And doing things should be easy.
+
 ### Doing now
 
 - [x] Parse literals, arithmetic expressions
@@ -28,6 +31,8 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] if statements
 - [x] update disassembleInstruction in debug to actually work with new opcode
 - [x] variable mutability + assignment
+- [ ] FIXME: Bug with not popping off constants in the stack with op_store, we use peek here.
+- [ ] For loop sema bug
 - [ ] test loop failure cases in parser
 - [ ] c loops, infinite loops, break, continue
 - [ ] nil expr that doesn't get evaluated at all, just a zero value
@@ -49,6 +54,9 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [ ] add escape sequences to lexer
 - [ ] proper argument parsing for the compiler, view sema output, compiler output, etc.
 - [ ] lang ref + std documentation
+- [ ] Zig's new Io interface is out, try making some portions of the compiler parallelizable.
+    What's the best way of breaking down source code into meaningful bits of work. Per package
+    seems like the worst option. Per file is probably the best.
 - [ ] read up on type systems and type inference. there's quite a lot i don't fully understand.
     * whats an elegant way of determining types, i just use a lot of if statements right now.
     * how do i handle user defined types? right now im just thinking of interning them
@@ -82,29 +90,6 @@ Since the compiler decides what goes on the heap or stack, just emit different o
 for different cases. For objects which can be stored on the stack like a struct, we can have
 different op codes for field access.
 
-#### Variables
-
-I want variables to work the same way as they do in zig. So no shadowing at
-all. This lets me resolve what each variable refers to at compile time. But, I
-do want to allow global variables to be used before they are declared. The package
-system in this language should also work just like odin's so that means global
-variables are allowed to be used across a package as well.
-
-Sema should make sure all variables are unique and don't overlap in the same
-scope / parent scope. Create a symbol table with names, types, and scope.
-
-Go through the AST and collect all top level declarations.
-
-Then in a second pass, go through the AST again and define all local variables
-and their scopes and types, go through function bodies.
-
-How will structs and enums fit into this?
-
-_Runtime_
-
-op_store (stack_slot)
-op_load  (stack_slot)
-
 #### Language demo project
 
 Making a custom engine and doing some small demo in it would be nice. Radiance
@@ -114,6 +99,11 @@ It'd be awesome if I could get an engine running in a browser.
 
 Another thing that would be cool is to statically generate norm's language reference + std docs
 using norm itself. That would also be a nice test for the language.
+
+#### WASM interpreter for norm
+
+This shouldn't take much work I think. The entire interpreter is language
+agnostic. I don't know how well the zig std library handles wasm though.
 
 #### Language Ideas
 

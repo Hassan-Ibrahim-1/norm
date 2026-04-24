@@ -20,7 +20,7 @@ pub const Scope = struct {
     // If `level` is .top this field is garbage
     parent: *Scope,
 
-    pub const Level = enum {
+    pub const Level = union(enum) {
         top,
         local,
     };
@@ -310,6 +310,71 @@ pub const Stmt = union(enum) {
         }
     };
 
+    pub const For = struct {
+        pub const InitializerStmt = union(enum) {
+            var_decl: VarDecl,
+            var_assign: VarAssign,
+            expr: Expression,
+
+            pub fn format(i: *const InitializerStmt, w: *Io.Writer) Io.Writer.Error!void {
+                switch (i.*) {
+                    inline else => |s| try s.format(w),
+                }
+            }
+        };
+
+        pub const IncrementStmt = union(enum) {
+            var_assign: VarAssign,
+            expr: Expression,
+
+            pub fn format(i: *const IncrementStmt, w: *Io.Writer) Io.Writer.Error!void {
+                switch (i.*) {
+                    inline else => |s| try s.format(w),
+                }
+            }
+        };
+
+        token: Token, // for
+
+        // initializer and increment are guaranteed to not both be null
+        initializer: ?InitializerStmt,
+        condition: *Expr,
+        increment: ?IncrementStmt,
+
+        block: Block,
+
+        pub fn format(f: *const For, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("for ", .{});
+            if (f.initializer) |init| {
+                try w.print("{f} ", .{init});
+            }
+            try w.print("{f}; ", .{f.condition});
+            if (f.increment) |incr| {
+                try w.print("{f} ", .{incr});
+            }
+            try w.print("{f}", .{f.block});
+        }
+    };
+
+    pub const ConditionFor = struct {
+        token: Token, // for
+        condition: *Expr,
+        block: Block,
+
+        pub fn format(f: *const ConditionFor, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("for {f} {f}", .{ f.condition, f.block });
+        }
+    };
+
+    pub const InfiniteFor = struct {
+        token: Token, // for
+        block: Block,
+
+        pub fn format(f: *const InfiniteFor, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("for {f}", .{f.block});
+        }
+    };
+
     pub const invalid: Stmt = undefined;
 
     expression: Expression,
@@ -317,6 +382,9 @@ pub const Stmt = union(enum) {
     var_assign: VarAssign,
     block: Block,
     if_stmt: If,
+    for_stmt: For,
+    condition_for: ConditionFor,
+    infinite_for: InfiniteFor,
     print: Print,
 
     pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {
