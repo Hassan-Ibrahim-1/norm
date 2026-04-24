@@ -335,6 +335,7 @@ pub const Stmt = union(enum) {
         };
 
         token: Token, // for
+        scope: *Scope,
 
         // initializer and increment are guaranteed to not both be null
         initializer: ?InitializerStmt,

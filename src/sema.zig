@@ -133,6 +133,7 @@ const Sema = struct {
                         s.expectTypeTryCast(s.expression(v), sym.type)
                     else
                         @panic("todo: zero values");
+                // Why would value every be null? This should be an error no?
                 if (value == null) return .invalid;
                 if (sym.type == .n_invalid) sym.type = value.?.type;
 
@@ -251,15 +252,16 @@ const Sema = struct {
             },
 
             .for_stmt => |for_stmt| {
+                const scope = s.beginScope();
+                defer s.endScope();
+
                 const initializer: ?Nir.Stmt.For.InitializerStmt = if (for_stmt.initializer) |i| s: {
                     const ast_stmt: Ast.Stmt = switch (i) {
                         .var_assign => |va| .{ .var_assign = va },
                         .var_decl => |vd| .{ .var_decl = vd },
                         .expr => |expr| .{ .expression = expr },
                     };
-                    dbg("ast_stmt", ast_stmt);
                     const nir_stmt = s.statement(ast_stmt);
-                    dbg("nir_stmt", nir_stmt);
                     break :s switch (nir_stmt) {
                         .var_assign => |va| .{ .var_assign = va },
                         .var_decl => |vd| .{ .var_decl = vd },
@@ -290,6 +292,7 @@ const Sema = struct {
                 return .{
                     .for_stmt = .{
                         .token = for_stmt.token,
+                        .scope = scope,
                         .initializer = initializer,
                         .condition = condition,
                         .increment = increment,
@@ -2413,7 +2416,7 @@ test "for loops" {
             \\}
             ,
             .expected =
-            \\for mut i: int = 0; (i:int < 10):bool; i = (i:int + 1):int {
+            \\for mut i: int = 0; (i:int < 10):bool; i = (i:int + 1):int; {
             \\}
             ,
         },
