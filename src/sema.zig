@@ -2420,6 +2420,38 @@ test "for loops" {
             \\}
             ,
         },
+        .{
+            .source =
+            \\for mut i := 0; i < 10; {
+            \\}
+            ,
+            .expected =
+            \\for mut i: int = 0; (i:int < 10):bool; {
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\i := 10;
+            \\for i < 10 {
+            \\}
+            ,
+            .expected =
+            \\i: int = 10;
+            \\for (i:int < 10):bool {
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\for {
+            \\}
+            ,
+            .expected =
+            \\for {
+            \\}
+            ,
+        },
     };
 
     for (tests) |t| {
