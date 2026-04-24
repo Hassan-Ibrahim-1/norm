@@ -242,9 +242,12 @@ pub fn opCodeToBytes(ops: anytype) [ops.len]u8 {
 
 const ers = @import("errors.zig");
 pub fn reportErrors(errors: anytype, file_name: []const u8, source: []const u8) void {
-    const stderr = std.debug.lockStderrWriter(&.{});
+    var buffer: [64]u8 = undefined;
+    const stderr = std.debug.lockStderr(&buffer);
+    defer std.debug.unlockStderr();
+    const w = &stderr.file_writer.interface;
     for (errors) |diag| {
-        ers.reportError(stderr, &diag.promote(file_name, source)) catch unreachable;
+        ers.reportError(w, &diag.promote(file_name, source)) catch unreachable;
     }
 }
 

@@ -12,23 +12,24 @@ const parser = @import("parser.zig");
 const compiler = @import("compiler.zig");
 const debug = @import("debug.zig");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer assert(gpa.deinit() == .ok);
     const alloc = gpa.allocator();
 
-    const args = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, args);
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
-    const stdin = std.fs.File.stdin();
+    const stdin = std.Io.File.stdin();
     _ = stdin; // autofix
 
     var stdout_buf: [1024]u8 = undefined;
-    var stdout_w = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_w = std.Io.File.stdout().writer(io, &stdout_buf);
     const stdout = &stdout_w.interface;
 
     var stderr_buf: [1024]u8 = undefined;
-    var stderr_w = std.fs.File.stderr().writer(&stderr_buf);
+    var stderr_w = std.Io.File.stderr().writer(io, &stderr_buf);
     const stderr = &stderr_w.interface;
 
     defer {
@@ -49,21 +50,22 @@ pub fn main() !void {
             try stderr.print("usage: norm -S [file]\n", .{});
             try stderr.flush();
         } else {
-            try dumpChunk(alloc, args[file_idx], stderr);
+            try dumpChunk(io, alloc, args[file_idx], stderr);
         }
     } else if (args.len == 2) {
-        try runFile(alloc, args[1], stdout, stderr);
+        try runFile(io, alloc, args[1], stdout, stderr);
     } else {
         try stderr.print("usage: norm [file]\n", .{});
         try stderr.flush();
     }
 }
 
-fn dumpChunk(gpa: Allocator, path: []const u8, stderr: *Io.Writer) !void {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+fn dumpChunk(io: std.Io, gpa: Allocator, path: []const u8, stderr: *Io.Writer) !void {
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
 
-    const source = try file.readToEndAlloc(gpa, 1_000_000);
+    var file_reader = file.reader(io, &.{});
+    const source = try file_reader.interface.allocRemaining(gpa, .unlimited);
     defer gpa.free(source);
 
     try stderr.print("{s}\n\n", .{source});
@@ -99,11 +101,12 @@ fn dumpChunk(gpa: Allocator, path: []const u8, stderr: *Io.Writer) !void {
     debug.disassembleChunk(stderr, &chunk, "main", source);
 }
 
-fn runFile(gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !void {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+fn runFile(io: std.Io, gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !void {
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
 
-    const source = try file.readToEndAlloc(gpa, 1_000_000);
+    var file_reader = file.reader(io, &.{});
+    const source = try file_reader.interface.allocRemaining(gpa, .unlimited);
     defer gpa.free(source);
 
     var lexer = Lexer.init(source);
@@ -147,5 +150,5 @@ test {
     _ = Lexer;
     _ = parser.parse;
     _ = compiler.Compiler;
-    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(@This());
 }
