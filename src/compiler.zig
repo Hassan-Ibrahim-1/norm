@@ -1155,6 +1155,28 @@ test "local variable assignment" {
             .source =
             \\{
             \\    mut y := 1;
+            \\    y = 2;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // mut y := 1
+                .op_constant, 0,
+
+                // y = 2;
+                .op_constant, 1,
+                .op_store, 0, 0,
+                .op_pop,
+
+                .op_pop,
+
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    mut y := 1;
             \\    y += 1;
             \\}
             ,
@@ -1174,6 +1196,34 @@ test "local variable assignment" {
                 .op_return,
             }),
             .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 1 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    mut y := 1;
+            \\    x := 3;
+            \\    y += x;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // mut y := 1
+                .op_constant, 0,
+
+                // x := 3
+                .op_constant, 1,
+
+                // y += x;
+                .op_load, 0, 0,
+                .op_load, 1, 0,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+
+                .op_pop_n, 2, 0,
+
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 3 } },
         },
     };
     // zig fmt: on
