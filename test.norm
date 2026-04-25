@@ -1,3 +1,4 @@
-if true {
-    x := 1;
+for mut i := 0; i < 10; i += 1 {
+    i += 1;
+    print(i);
 }

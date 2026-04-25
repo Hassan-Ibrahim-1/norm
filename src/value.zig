@@ -12,7 +12,7 @@ pub const Value = union(enum) {
         }
     };
 
-    integer: i32,
+    integer: i64,
     float: f64,
     boolean: bool,
     nil: void,

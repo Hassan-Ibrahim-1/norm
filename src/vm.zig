@@ -263,7 +263,7 @@ pub const Vm = struct {
                 },
 
                 .op_load => {
-                    std.debug.assert(vm.stack_top - &vm.stack != 0);
+                    // std.debug.assert(vm.stack_top - &vm.stack != 0);
                     const stack_slot = vm.readShort();
                     vm.push(vm.stack[stack_slot]);
                 },
@@ -290,6 +290,11 @@ pub const Vm = struct {
                     const offset = vm.readShort();
                     const condition = vm.pop();
                     if (!condition.boolean) vm.ip += offset;
+                },
+
+                .op_loop => {
+                    const offset = vm.readShort();
+                    vm.ip -= offset;
                 },
 
                 .op_return => {

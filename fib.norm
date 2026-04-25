@@ -1,0 +1,15 @@
+{
+    fib := 92;
+    mut prev := 0;
+    mut curr := 1;
+
+    print(prev);
+    print(curr);
+
+    for mut i := 2; i <= fib; i += 1 {
+        next := prev + curr;
+        print(next);
+        prev = curr;
+        curr = next;
+    }
+}

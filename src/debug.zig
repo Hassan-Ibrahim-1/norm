@@ -112,6 +112,7 @@ pub fn disassembleInstruction(
         .op_load,
         .op_jump,
         .op_jump_if_false,
+        .op_loop,
         => shortInstruction(w, instruction, chunk, offset),
 
         .op_pop_n => popNInstruction(w, instruction, chunk, offset),

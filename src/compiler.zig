@@ -138,6 +138,11 @@ pub const OpCode = enum(u8) {
     // move forward by `offset` instructions
     op_jump_if_false,
 
+    // op_loop <offset: u16>
+    //
+    // Move back by `offset` instructions
+    op_loop,
+
     // Temporary: Signals end of execution
     op_return,
 
@@ -323,8 +328,50 @@ pub const Compiler = struct {
                     c.patchJump(jump);
                 }
             },
-            else => unreachable,
+            .for_stmt => |for_stmt| {
+                c.beginScope(for_stmt.scope);
+                defer c.endScope(for_stmt.block.token.line);
+
+                if (for_stmt.initializer) |initializer| {
+                    const nir_init: Nir.Stmt = switch (initializer) {
+                        .var_assign => |va| .{ .var_assign = va },
+                        .var_decl => |vd| .{ .var_decl = vd },
+                        .expr => |expr| .{ .expression = expr },
+                    };
+                    c.statement(nir_init);
+                }
+                const loop_index = c.compiling_chunk.code.items.len;
+                c.expression(for_stmt.condition);
+                const jump_index = c.emitJump(.op_jump_if_false, for_stmt.token.line);
+
+                c.statement(.{ .block = for_stmt.block });
+
+                if (for_stmt.increment) |increment| {
+                    const nir_increment: Nir.Stmt = switch (increment) {
+                        .var_assign => |va| .{ .var_assign = va },
+                        .expr => |expr| .{ .expression = expr },
+                    };
+                    c.statement(nir_increment);
+                }
+                c.emitLoop(loop_index, for_stmt.block.token.line);
+                c.patchJump(jump_index);
+            },
+            .condition_for => |f| {
+                _ = f; // autofix
+            },
+            .infinite_for => |f| {
+                _ = f; // autofix
+                unreachable;
+            },
         }
+    }
+
+    /// returns the index of the jump opcode
+    fn emitLoop(c: *Compiler, loop_index: usize, line: u32) void {
+        c.emitOpCode(.op_loop, line);
+        // + 2 to account for the short being emitted
+        const offset = c.compiling_chunk.code.items.len - loop_index + 2;
+        c.emitShort(@intCast(offset), line);
     }
 
     /// returns the index of the jump opcode
@@ -338,7 +385,7 @@ pub const Compiler = struct {
     fn patchJump(c: *Compiler, jump_index: usize) void {
         const code = c.compiling_chunk.code.items;
         const offset_arg = code[jump_index + 1 .. jump_index + 3][0..2];
-        // the -2 is there to account for vm reading the offset short first.
+        // the -3 is there to account for vm reading the offset short first.
         const offset = as(u16, code.len - jump_index - 3);
         mem.writeInt(u16, offset_arg, offset, .little);
     }
@@ -1870,6 +1917,64 @@ test "if statements with variable declarations - scope ends properly" {
         errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
         var chunk = try testCompile(gpa, t.source);
         defer chunk.deinit();
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "full for loops" {
+    @setEvalBranchQuota(10000);
+    const gpa = testing.allocator;
+    // zig fmt: off
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source =
+            \\for mut i := 0; i < 10; i += 1 {
+            \\    print(i);
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // mut i := 0
+                .op_constant, 0,
+
+                // i < 10
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_less_int,
+                .op_jump_if_false, 17, 0,
+
+                // print(i);
+                .op_load, 0, 0,
+                .op_temp_print,
+
+                // i += 1
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+                .op_loop, 23, 0,
+
+                .op_pop,
+
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 10 }, .{ .integer = 1 } },
+        },
+    };
+    // zig fmt: on
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        errdefer {
+            var stderr = Io.File.stderr().writer(testing.io, &.{});
+            debug.disassembleChunk(&stderr.interface, &chunk, "output chunk", t.source);
+        }
 
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);

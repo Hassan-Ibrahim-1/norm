@@ -135,27 +135,39 @@ const Parser = struct {
         if (p.check(.identifier)) {
             if (p.checkNextEither(&.{ .colon, .colon_equal })) {
                 p.advance();
-                return p.varDecl(false);
+                const var_decl = p.varDecl(false);
+                p.consumeSemicolon();
+                return var_decl;
             } else if (p.checkNextEither(&.{ .plus_equal, .minus_equal, .star_equal, .slash_equal })) {
                 p.advance();
-                return p.varAssignEql();
+                const var_assign = p.varAssignEql();
+                p.consumeSemicolon();
+                return var_assign;
             } else if (p.checkNext(.equal)) {
                 p.advance();
-                return p.varAssign();
+                const var_assign = p.varAssign();
+                p.consumeSemicolon();
+                return var_assign;
             }
         } else if (p.match(.kw_mut)) {
             p.consume(.identifier, "Expect identifier after mut");
-            return p.varDecl(true);
+            const var_decl = p.varDecl(true);
+            p.consumeSemicolon();
+            return var_decl;
         } else if (p.match(.left_brace)) {
             return p.blockStmt();
         } else if (p.match(.kw_if)) {
             return p.ifStmt();
         } else if (p.match(.kw_print)) {
-            return p.printStmt();
+            const print_stmt = p.printStmt();
+            p.consumeSemicolon();
+            return print_stmt;
         } else if (p.match(.kw_for)) {
             return p.forStmt();
         }
-        return p.expressionStmt();
+        const expr = p.expressionStmt();
+        p.consumeSemicolon();
+        return expr;
     }
 
     /// If null there was no increment
@@ -163,7 +175,9 @@ const Parser = struct {
         cond: *Ast.Expr,
         init: ?Ast.Stmt.For.InitializerStmt,
     } {
-        if (p.match(.semicolon)) return .{ .init = null };
+        defer p.consumeSemicolon();
+
+        if (p.check(.semicolon)) return .{ .init = null };
 
         if (p.check(.identifier)) {
             if (p.checkNextEither(&.{ .colon, .colon_equal })) {
@@ -181,7 +195,7 @@ const Parser = struct {
             return .{ .init = .{ .var_decl = p.varDecl(true).var_decl } };
         }
         const expr = p.expression(.lowest);
-        if (p.match(.semicolon)) {
+        if (p.check(.semicolon)) {
             return .{ .init = .{ .expr = .{ .expr = expr } } };
         }
         return .{ .cond = expr };
@@ -324,7 +338,6 @@ const Parser = struct {
 
     fn expressionStmt(p: *Parser) Ast.Stmt {
         const expr = p.expression(.lowest);
-        p.consumeSemicolon();
 
         return .{
             .expression = .{ .expr = expr },
@@ -337,7 +350,6 @@ const Parser = struct {
         const expr = p.expression(.lowest);
 
         p.consume(.right_paren, "Expect ')' after print");
-        p.consumeSemicolon();
 
         return .{ .print = .{ .print = print, .expr = expr } };
     }
@@ -349,7 +361,6 @@ const Parser = struct {
         if (p.match(.colon)) {
             type_expr = p.expression(.lowest);
             if (!p.match(.equal)) {
-                p.consumeSemicolon();
                 return .{
                     .var_decl = .{
                         .ident = ident,
@@ -364,7 +375,6 @@ const Parser = struct {
         }
 
         const value = p.expression(.lowest);
-        p.consumeSemicolon();
 
         return .{
             .var_decl = .{
@@ -381,7 +391,6 @@ const Parser = struct {
         // we know that there is an equal token next so we don't have to check
         p.advance();
         const value = p.expression(.lowest);
-        p.consumeSemicolon();
 
         return .{
             .var_assign = .{
@@ -395,18 +404,18 @@ const Parser = struct {
         const ident = p.previous;
         p.advance();
 
+        const line = p.previous.line;
         const operator: Token = switch (p.previous.type) {
-            .plus_equal => .{ .type = .plus, .lexeme = "+", .line = p.previous.line },
-            .minus_equal => .{ .type = .minus, .lexeme = "-", .line = p.previous.line },
-            .star_equal => .{ .type = .star, .lexeme = "*", .line = p.previous.line },
-            .slash_equal => .{ .type = .slash, .lexeme = "/", .line = p.previous.line },
+            .plus_equal => .{ .type = .plus, .lexeme = "+", .line = line },
+            .minus_equal => .{ .type = .minus, .lexeme = "-", .line = line },
+            .star_equal => .{ .type = .star, .lexeme = "*", .line = line },
+            .slash_equal => .{ .type = .slash, .lexeme = "/", .line = line },
             else => unreachable,
         };
 
         const right = p.expression(.lowest);
         const left = makeIdentifier(p.arena, ident);
         const value = makeBinary(p.arena, left, operator, right);
-        p.consumeSemicolon();
 
         return .{
             .var_assign = .{
@@ -536,6 +545,8 @@ const Parser = struct {
 
     fn consume(p: *Parser, expected: Token.Type, msg: []const u8) void {
         if (p.match(expected)) return;
+
+        if (expected == .semicolon) @panic("here");
 
         p.reportError(.{
             .error_msg = msg,
