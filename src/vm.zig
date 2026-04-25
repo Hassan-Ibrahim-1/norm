@@ -65,7 +65,6 @@ pub const Vm = struct {
         while (true) {
             const instruction: OpCode = @enumFromInt(vm.readByte());
             if (comptime opts.debug_trace) {
-                const stack_len = vm.stack_top - &vm.stack;
                 _ = debug.disassembleInstruction(
                     vm.stderr,
                     vm.chunk,
@@ -73,9 +72,7 @@ pub const Vm = struct {
                 ) catch unreachable;
 
                 vm.stderr.print("          ", .{}) catch unreachable;
-                for (0..stack_len) |i| {
-                    vm.stderr.print("[ {f} ]", .{vm.stack[i]}) catch unreachable;
-                }
+                vm.dumpStack(vm.stderr);
                 vm.stderr.print("\n", .{}) catch unreachable;
                 vm.stderr.flush() catch unreachable;
             }
@@ -266,6 +263,7 @@ pub const Vm = struct {
                 },
 
                 .op_load => {
+                    std.debug.assert(vm.stack_top - &vm.stack != 0);
                     const stack_slot = vm.readShort();
                     vm.push(vm.stack[stack_slot]);
                 },
@@ -361,6 +359,13 @@ pub const Vm = struct {
     fn stringEqual(a: Value.String, b: Value.String) bool {
         if (a.data.ptr == b.data.ptr) return true;
         return mem.eql(u8, a.data, b.data);
+    }
+
+    fn dumpStack(vm: *Vm, w: *Io.Writer) void {
+        const stack_len = vm.stack_top - &vm.stack;
+        for (0..stack_len) |i| {
+            w.print("[ {f} ]", .{vm.stack[i]}) catch unreachable;
+        }
     }
 };
 

@@ -263,10 +263,7 @@ pub const Compiler = struct {
                     c.emitOpCode(.op_pop, expr_stmt.expr.token().line);
                 }
             },
-            .var_decl => |vd| {
-                const sym = c.findSym(vd.ident.lexeme);
-                c.decl(vd, @intCast(sym.stack_slot));
-            },
+            .var_decl => |vd| c.expression(vd.value),
             .print => |p| {
                 c.expression(p.expr);
                 c.emitOpCode(.op_temp_print, p.print.line);
@@ -282,6 +279,8 @@ pub const Compiler = struct {
                 const sym = c.findSym(va.ident.lexeme);
                 c.expression(va.value);
                 c.emitStore(@intCast(sym.stack_slot), va.ident.line);
+                // We need this here because op_store does not pop values off the stack.
+                c.emitOpCode(.op_pop, va.ident.line);
             },
             .if_stmt => |if_stmt| {
                 const has_branches = if_stmt.else_block != null or if_stmt.else_if_blocks.len != 0;
@@ -367,9 +366,8 @@ pub const Compiler = struct {
         }
     }
 
-    fn decl(c: *Compiler, vd: Nir.Stmt.VarDecl, stack_slot: u16) void {
+    fn decl(c: *Compiler, vd: Nir.Stmt.VarDecl) void {
         c.expression(vd.value);
-        c.emitStore(stack_slot, vd.ident.line);
     }
 
     fn identifier(c: *Compiler, i: *Nir.Expr.Identifier) void {
@@ -889,14 +887,14 @@ test "global variables - simple op_store" {
     const tests: []const TestCase = &.{
         .{
             .source = "x := 10;",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_store, 0, 0, .op_return }),
-            .expected_lines = &.{ 1, 1, 1, 1, 1, 0 },
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_return }),
+            .expected_lines = &.{ 1, 1, 0 },
             .expected_constants = &.{.{ .integer = 10 }},
         },
         .{
             .source = "x := 10; y := false;",
-            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_store, 0, 0, .op_false, .op_store, 1, 0, .op_return }),
-            .expected_lines = &.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 0 },
+            .expected_code = &debug.opCodeToBytes(&.{ .op_constant, 0, .op_false, .op_return }),
+            .expected_lines = &.{ 1, 1, 1, 0 },
             .expected_constants = &.{.{ .integer = 10 }},
         },
     };
@@ -920,7 +918,6 @@ test "global variables - op_load" {
             .source = "x := 10; x;",
             .expected_code = &debug.opCodeToBytes(&.{
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_load, 0, 0,
                 .op_return,
             }),
@@ -930,9 +927,7 @@ test "global variables - op_load" {
             .source = "x := 10; y := x;",
             .expected_code = &debug.opCodeToBytes(&.{
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_load, 0, 0,
-                .op_store, 1, 0,
                 .op_return,
             }),
             .expected_constants = &.{.{ .integer = 10 }},
@@ -941,9 +936,7 @@ test "global variables - op_load" {
             .source = "x := 10; y := x; x + y",
             .expected_code = &debug.opCodeToBytes(&.{
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_load, 0, 0,
-                .op_store, 1, 0,
                 .op_load, 0, 0,
                 .op_load, 1, 0,
                 .op_add_int,
@@ -959,9 +952,7 @@ test "global variables - op_load" {
             ,
             .expected_code = &debug.opCodeToBytes(&.{
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_constant, 1,
-                .op_store, 1, 0,
                 .op_load, 0, 0,
                 .op_return,
             }),
@@ -996,13 +987,11 @@ test "local variables and scopes - op_load, op_store and scope popping" {
             .expected_code = &debug.opCodeToBytes(&.{
                 // x
                 .op_constant, 0,
-                .op_store, 0, 0,
 
                 // y
                 .op_load, 0, 0,
                 .op_constant, 1,
                 .op_add_int,
-                .op_store, 1, 0,
 
                 .op_pop,
 
@@ -1021,17 +1010,14 @@ test "local variables and scopes - op_load, op_store and scope popping" {
             .expected_code = &debug.opCodeToBytes(&.{
                 // x
                 .op_constant, 0,
-                .op_store, 0, 0,
 
                 // z
                 .op_false,
-                .op_store, 1, 0,
 
                 // y
                 .op_load, 0, 0,
                 .op_constant, 1,
                 .op_add_int,
-                .op_store, 2, 0,
 
                 .op_pop,
 
@@ -1052,19 +1038,16 @@ test "local variables and scopes - op_load, op_store and scope popping" {
             .expected_code = &debug.opCodeToBytes(&.{
                 // a
                 .op_constant, 0,
-                .op_store, 0, 0,
 
                 // b
                 .op_load, 0, 0,
                 .op_constant, 1,
                 .op_add_int,
-                .op_store, 1, 0,
 
                 // c
                 .op_load, 0, 0,
                 .op_load, 1, 0,
                 .op_add_int,
-                .op_store, 2, 0,
 
                 .op_pop_n, 2, 0,
                 .op_pop,
@@ -1087,25 +1070,21 @@ test "local variables and scopes - op_load, op_store and scope popping" {
             .expected_code = &debug.opCodeToBytes(&.{
                 // a
                 .op_constant, 0,
-                .op_store, 0, 0,
 
                 // b
                 .op_load, 0, 0,
                 .op_constant, 1,
                 .op_add_int,
-                .op_store, 1, 0,
 
                 // c1
                 .op_load, 0, 0,
                 .op_load, 1, 0,
                 .op_add_int,
-                .op_store, 2, 0,
 
                 .op_pop_n, 2, 0,
 
                 // c2
                 .op_true,
-                .op_store, 1, 0,
 
                 .op_pop_n, 2, 0,
 
@@ -1128,35 +1107,73 @@ test "local variables and scopes - op_load, op_store and scope popping" {
             .expected_code = &debug.opCodeToBytes(&.{
                 // z
                 .op_constant, 0,
-                .op_store, 0, 0,
 
                 // a
                 .op_constant, 1,
-                .op_store, 1, 0,
 
                 // b
                 .op_load, 1, 0,
                 .op_constant, 2,
                 .op_add_int,
-                .op_store, 2, 0,
 
                 // c1
                 .op_load, 1, 0,
                 .op_load, 2, 0,
                 .op_add_int,
-                .op_store, 3, 0,
 
                 .op_pop_n, 2, 0,
 
                 // c2
                 .op_true,
-                .op_store, 2, 0,
 
                 .op_pop_n, 2, 0,
 
                 .op_return,
             }),
             .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 1 }, .{ .integer = 1 } },
+        },
+    };
+    // zig fmt: on
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "local variable assignment" {
+    @setEvalBranchQuota(20000);
+
+    const gpa = testing.allocator;
+    // zig fmt: off
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source =
+            \\{
+            \\    mut y := 1;
+            \\    y += 1;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // mut y := 1
+                .op_constant, 0,
+
+                // y += 1;
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+
+                .op_pop,
+
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 1 }, .{ .integer = 1 } },
         },
     };
     // zig fmt: on
@@ -1536,9 +1553,8 @@ test "if statements with variable declarations - scope ends properly" {
             ,
             .expected_code = &debug.opCodeToBytes(&.{
                 .op_true,
-                .op_jump_if_false, 6, 0,
+                .op_jump_if_false, 3, 0,
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_pop,
                 .op_return,
             }),
@@ -1552,9 +1568,8 @@ test "if statements with variable declarations - scope ends properly" {
             ,
             .expected_code = &debug.opCodeToBytes(&.{
                 .op_false,
-                .op_jump_if_false, 6, 0,
+                .op_jump_if_false, 3, 0,
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_pop,
                 .op_return,
             }),
@@ -1570,12 +1585,10 @@ test "if statements with variable declarations - scope ends properly" {
             .expected_code = &debug.opCodeToBytes(&.{
                 // x
                 .op_constant, 0,
-                .op_store, 0, 0,
                 // if block
                 .op_true,
-                .op_jump_if_false, 6, 0,
+                .op_jump_if_false, 3, 0,
                 .op_constant, 1,
-                .op_store, 1, 0,
                 .op_pop,
                 .op_return,
             }),
@@ -1591,13 +1604,11 @@ test "if statements with variable declarations - scope ends properly" {
             ,
             .expected_code = &debug.opCodeToBytes(&.{
                 .op_true,
-                .op_jump_if_false, 9, 0,
+                .op_jump_if_false, 6, 0,
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_pop,
-                .op_jump, 6, 0,
+                .op_jump, 3, 0,
                 .op_constant, 1,
-                .op_store, 0, 0,
                 .op_pop,
                 .op_return,
             }),
@@ -1615,12 +1626,10 @@ test "if statements with variable declarations - scope ends properly" {
             .expected_code = &debug.opCodeToBytes(&.{
                 // a
                 .op_constant, 0,
-                .op_store, 0, 0,
                 // if block
                 .op_true,
-                .op_jump_if_false, 6, 0,
+                .op_jump_if_false, 3, 0,
                 .op_constant, 1,
-                .op_store, 1, 0,
                 .op_pop,
                 // scope end
                 .op_pop,
@@ -1639,14 +1648,12 @@ test "if statements with variable declarations - scope ends properly" {
             ,
             .expected_code = &debug.opCodeToBytes(&.{
                 .op_true,
-                .op_jump_if_false, 16, 0,
+                .op_jump_if_false, 10, 0,
                 .op_false,
-                .op_jump_if_false, 6, 0,
+                .op_jump_if_false, 3, 0,
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_pop,
                 .op_constant, 1,
-                .op_store, 0, 0,
                 .op_pop,
                 .op_return,
             }),
@@ -1662,9 +1669,8 @@ test "if statements with variable declarations - scope ends properly" {
                 .op_true,
                 .op_false,
                 .op_and,
-                .op_jump_if_false, 6, 0,
+                .op_jump_if_false, 3, 0,
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_pop,
                 .op_return,
             }),
@@ -1680,17 +1686,15 @@ test "if statements with variable declarations - scope ends properly" {
             .expected_code = &debug.opCodeToBytes(&.{
                 // x
                 .op_constant, 0,
-                .op_store, 0, 0,
                 // condition
                 .op_load, 0, 0,
                 .op_constant, 1,
                 .op_greater_int,
                 // if block
-                .op_jump_if_false, 10, 0,
+                .op_jump_if_false, 7, 0,
                 .op_load, 0, 0,
                 .op_constant, 2,
                 .op_add_int,
-                .op_store, 1, 0,
                 .op_pop,
                 .op_return,
             }),
@@ -1706,13 +1710,10 @@ test "if statements with variable declarations - scope ends properly" {
             ,
             .expected_code = &debug.opCodeToBytes(&.{
                 .op_true,
-                .op_jump_if_false, 18, 0,
+                .op_jump_if_false, 9, 0,
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_constant, 1,
-                .op_store, 1, 0,
                 .op_constant, 2,
-                .op_store, 2, 0,
                 .op_pop_n, 3, 0,
                 .op_return,
             }),
@@ -1731,22 +1732,18 @@ test "if statements with variable declarations - scope ends properly" {
             ,
             .expected_code = &debug.opCodeToBytes(&.{
                 .op_true,
-                .op_jump_if_false, 30, 0,
+                .op_jump_if_false, 18, 0,
                 // a
                 .op_constant, 0,
-                .op_store, 0, 0,
                 // nested if
                 .op_true,
-                .op_jump_if_false, 13, 0,
+                .op_jump_if_false, 7, 0,
                 // b, c
                 .op_constant, 1,
-                .op_store, 1, 0,
                 .op_constant, 2,
-                .op_store, 2, 0,
                 .op_pop_n, 2, 0,
                 // d
                 .op_constant, 3,
-                .op_store, 1, 0,
                 .op_pop_n, 2, 0,
                 .op_return,
             }),
@@ -1769,23 +1766,18 @@ test "if statements with variable declarations - scope ends properly" {
             .expected_code = &debug.opCodeToBytes(&.{
                 // if-else
                 .op_true,
-                .op_jump_if_false, 16, 0,
+                .op_jump_if_false, 10, 0,
                 // a, b
                 .op_constant, 0,
-                .op_store, 0, 0,
                 .op_constant, 1,
-                .op_store, 1, 0,
                 .op_pop_n, 2, 0,
-                .op_jump, 13, 0,
+                .op_jump, 7, 0,
                 // c, d
                 .op_constant, 2,
-                .op_store, 0, 0,
                 .op_constant, 3,
-                .op_store, 1, 0,
                 .op_pop_n, 2, 0,
                 // e
                 .op_constant, 4,
-                .op_store, 0, 0,
                 // scope end
                 .op_pop,
                 .op_return,
@@ -1804,17 +1796,15 @@ test "if statements with variable declarations - scope ends properly" {
             .expected_code = &debug.opCodeToBytes(&.{
                 // a
                 .op_constant, 0,
-                .op_store, 0, 0,
                 // condition a > 0
                 .op_load, 0, 0,
                 .op_constant, 1,
                 .op_greater_int,
-                .op_jump_if_false, 10, 0,
+                .op_jump_if_false, 7, 0,
                 // b := a + 1
                 .op_load, 0, 0,
                 .op_constant, 2,
                 .op_add_int,
-                .op_store, 1, 0,
                 // pop b
                 .op_pop,
                 // pop a

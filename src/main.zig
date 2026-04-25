@@ -21,15 +21,15 @@ pub fn main(init: std.process.Init) !void {
 
     const args = try init.minimal.args.toSlice(init.arena.allocator());
 
-    const stdin = std.Io.File.stdin();
+    const stdin = Io.File.stdin();
     _ = stdin; // autofix
 
     var stdout_buf: [1024]u8 = undefined;
-    var stdout_w = std.Io.File.stdout().writer(io, &stdout_buf);
+    var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
     const stdout = &stdout_w.interface;
 
     var stderr_buf: [1024]u8 = undefined;
-    var stderr_w = std.Io.File.stderr().writer(io, &stderr_buf);
+    var stderr_w = Io.File.stderr().writer(io, &stderr_buf);
     const stderr = &stderr_w.interface;
 
     defer {
@@ -60,8 +60,11 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-fn dumpChunk(io: std.Io, gpa: Allocator, path: []const u8, stderr: *Io.Writer) !void {
-    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+fn dumpChunk(io: Io, gpa: Allocator, path: []const u8, stderr: *Io.Writer) !void {
+    const file = Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return stderr.print("{s}: file not found\n", .{path}),
+        else => return err,
+    };
     defer file.close(io);
 
     var file_reader = file.reader(io, &.{});
@@ -101,8 +104,11 @@ fn dumpChunk(io: std.Io, gpa: Allocator, path: []const u8, stderr: *Io.Writer) !
     debug.disassembleChunk(stderr, &chunk, "main", source);
 }
 
-fn runFile(io: std.Io, gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !void {
-    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+fn runFile(io: Io, gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !void {
+    const file = Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return stderr.print("{s}: file not found\n", .{path}),
+        else => return err,
+    };
     defer file.close(io);
 
     var file_reader = file.reader(io, &.{});
