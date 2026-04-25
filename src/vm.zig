@@ -950,6 +950,63 @@ test "local variables + scopes" {
     }
 }
 
+test "local variable assignment" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{
+        .{
+            .source =
+            \\{
+            \\    mut y := 1;
+            \\    y = 2;
+            \\    print(y);
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+
+        .{
+            .source =
+            \\{
+            \\    mut y := 1;
+            \\    y += 1;
+            \\    print(y);
+            \\}
+            ,
+            .expected = .{ .integer = 2 },
+        },
+
+        .{
+            .source =
+            \\{
+            \\    mut y := 1;
+            \\    x := 3;
+            \\    y += x;
+            \\    print(y);
+            \\}
+            ,
+            .expected = .{ .integer = 4 },
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const result = try testRunPrint(gpa, t.source);
+        defer gpa.free(result);
+
+        var temp_writer: Io.Writer.Allocating = .init(gpa);
+        defer temp_writer.deinit();
+
+        try temp_writer.writer.print("{f}\n", .{t.expected});
+        const expected_str = temp_writer.written();
+
+        try testing.expectEqualStrings(expected_str, result);
+    }
+}
+
 test "if statements" {
     const gpa = testing.allocator;
 
