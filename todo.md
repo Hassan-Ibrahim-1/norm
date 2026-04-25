@@ -31,8 +31,8 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] if statements
 - [x] update disassembleInstruction in debug to actually work with new opcode
 - [x] variable mutability + assignment
-- [ ] FIXME: Bug with not popping off constants in the stack with op_store, we use peek here.
-- [ ] For loop sema bug
+- [x] FIXME: Bug with not popping off constants in the stack with op_store, we use peek here.
+- [x] For loop sema bug
 - [ ] test loop failure cases in parser
 - [ ] c loops, infinite loops, break, continue
 - [ ] nil expr that doesn't get evaluated at all, just a zero value
