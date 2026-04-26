@@ -23,6 +23,8 @@ const Parser = struct {
     current: Token,
     next: Token,
 
+    parsing_loop: bool,
+
     // TODO: reset on statement boundary
     panic_mode: bool,
     errors: std.ArrayList(Ast.Diagnostics),
@@ -106,10 +108,17 @@ const Parser = struct {
         .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_float
         .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_bool
         .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_string
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_break
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_continue
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_print
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // _error
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // eof,
     };
+
+    comptime {
+        const last_token = Token.Type.eof;
+        std.debug.assert(parse_rules.len == @intFromEnum(last_token) + 1);
+    }
 
     fn getRule(tt: Token.Type) *const ParseRule {
         return &parse_rules[@intFromEnum(tt)];
@@ -124,6 +133,7 @@ const Parser = struct {
             .previous = tokens[0],
             .current = tokens[0],
             .next = tokens[0],
+            .parsing_loop = false,
             .panic_mode = false,
             .errors = .empty,
         };
@@ -163,14 +173,31 @@ const Parser = struct {
             p.consumeSemicolon();
             return print_stmt;
         } else if (p.match(.kw_for)) {
+            p.parsing_loop = true;
             return p.forStmt();
+        } else if (p.matchEither(.kw_break, .kw_continue)) {
+            if (!p.parsing_loop) {
+                p.jumpStmtOutsideLoop(p.previous);
+                return .invalid;
+            }
+            const stmt = p.loopJumpStmt();
+            p.consumeSemicolon();
+            return stmt;
         }
         const expr = p.expressionStmt();
         p.consumeSemicolon();
         return expr;
     }
 
-    /// If null there was no increment
+    fn loopJumpStmt(p: *Parser) Ast.Stmt {
+        const token = p.previous;
+        return switch (token.type) {
+            .kw_break => .{ .break_stmt = .{ .token = token } },
+            .kw_continue => .{ .continue_stmt = .{ .token = token } },
+            else => unreachable,
+        };
+    }
+
     fn forInit(p: *Parser) union(enum) {
         cond: *Ast.Expr,
         init: ?Ast.Stmt.For.InitializerStmt,
@@ -592,6 +619,17 @@ const Parser = struct {
         return false;
     }
 
+    fn jumpStmtOutsideLoop(p: *Parser, token: Token) void {
+        p.reportError(.{
+            .error_msg = switch (token.type) {
+                .kw_break => "Found break statement outside a loop",
+                .kw_continue => "Found continue statement outside a loop",
+                else => unreachable,
+            },
+            .line = token.line,
+        });
+    }
+
     fn reportError(p: *Parser, diag: Ast.Diagnostics) void {
         if (p.panic_mode) return;
         p.errors.append(p.arena, diag) catch oom();
@@ -608,6 +646,8 @@ pub fn parse(gpa: Allocator, tokens: []Token) Ast {
     var stmts: std.ArrayList(Ast.Stmt) = .empty;
 
     while (true) {
+        defer p.parsing_loop = false;
+
         const stmt = p.statement();
         stmts.append(arena.allocator(), stmt) catch oom();
 
@@ -1571,6 +1611,97 @@ test "for loops" {
             ,
             .expected =
             \\for (2 + 3); (i < 10); (3 + 2); {
+            \\}
+            ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testParseStmts(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "loop jump stmts" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\for {
+            \\    break;
+            \\}
+            ,
+            .expected =
+            \\for {
+            \\    break;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\for {
+            \\    continue;
+            \\}
+            ,
+            .expected =
+            \\for {
+            \\    continue;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\for mut i := 0; i < 3; i += 1 {
+            \\    if true {
+            \\        break;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\for mut i := 0; (i < 3); i = (i + 1); {
+            \\    if true {
+            \\    break;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\for {
+            \\    for {
+            \\        continue;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\for {
+            \\    for {
+            \\    continue;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\for {
+            \\    for {
+            \\        continue;
+            \\    }
+            \\    break;
+            \\}
+            ,
+            .expected =
+            \\for {
+            \\    for {
+            \\    continue;
+            \\}
+            \\    break;
             \\}
             ,
         },

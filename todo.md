@@ -50,6 +50,8 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [ ] simd vector + matrix
 - [ ] package system
 - [ ] standard library
+- [ ] loop labels
+- [ ] test error cases in parser
 - [ ] handle integers that are too big or too small, same for floats, this can be done in parser.
 - [ ] add escape sequences to lexer
 - [ ] proper argument parsing for the compiler, view sema output, compiler output, etc.

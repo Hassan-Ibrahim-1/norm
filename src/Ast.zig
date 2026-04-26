@@ -106,6 +106,22 @@ pub const Stmt = union(enum) {
         }
     };
 
+    pub const Break = struct {
+        token: Token,
+
+        pub fn format(_: *const Break, w: *Io.Writer) Io.Writer.Error!void {
+            try w.writeAll("break;");
+        }
+    };
+
+    pub const Continue = struct {
+        token: Token,
+
+        pub fn format(_: *const Continue, w: *Io.Writer) Io.Writer.Error!void {
+            try w.writeAll("continue;");
+        }
+    };
+
     pub const For = struct {
         pub const InitializerStmt = union(enum) {
             var_decl: VarDecl,
@@ -188,6 +204,8 @@ pub const Stmt = union(enum) {
     for_stmt: For,
     condition_for: ConditionFor,
     infinite_for: InfiniteFor,
+    break_stmt: Break,
+    continue_stmt: Continue,
     print: Print,
 
     pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {

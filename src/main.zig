@@ -153,8 +153,5 @@ fn runFile(io: Io, gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr:
 }
 
 test {
-    _ = Lexer;
-    _ = parser.parse;
-    _ = compiler.Compiler;
     std.testing.refAllDecls(@This());
 }

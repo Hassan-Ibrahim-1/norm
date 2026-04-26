@@ -66,6 +66,8 @@ pub const Token = struct {
         kw_float,
         kw_bool,
         kw_string,
+        kw_break,
+        kw_continue,
         kw_print,
 
         _error,
@@ -257,12 +259,14 @@ fn identifier(l: *Lexer) Token {
 }
 
 fn identifierType(l: *Lexer) Token.Type {
+    // TODO: REFACTOR THIS
     return switch (l.source[l.start]) {
         'a' => l.checkKeyword(1, "nd", .kw_and),
+        'c' => l.checkKeyword(1, "ontinue", .kw_continue),
         'n' => l.checkKeyword(1, "il", .kw_nil),
         'o' => l.checkKeyword(1, "r", .kw_or),
         'm' => l.checkKeyword(1, "ut", .kw_mut),
-        's' => if (l.current > l.start)
+        's' => if (l.current > l.start + 1)
             switch (l.source[l.start + 1]) {
                 'w' => l.checkKeyword(1, "witch", .kw_switch),
                 't' => if (l.current > l.start + 3)
@@ -277,9 +281,16 @@ fn identifierType(l: *Lexer) Token.Type {
             }
         else
             .identifier,
-        'b' => l.checkKeyword(1, "ool", .kw_bool),
+        'b' => if (l.current > l.start + 1)
+            switch (l.source[l.start + 1]) {
+                'o' => l.checkKeyword(2, "ol", .kw_bool),
+                'r' => l.checkKeyword(2, "eak", .kw_break),
+                else => .identifier,
+            }
+        else
+            .identifier,
 
-        'e' => if (l.current > l.start)
+        'e' => if (l.current > l.start + 1)
             switch (l.source[l.start + 1]) {
                 'l' => l.checkKeyword(2, "se", .kw_else),
                 'n' => l.checkKeyword(2, "um", .kw_enum),
@@ -290,7 +301,7 @@ fn identifierType(l: *Lexer) Token.Type {
 
         'p' => l.checkKeyword(1, "rint", .kw_print),
 
-        'r' => if (l.current > l.start)
+        'r' => if (l.current > l.start + 1)
             switch (l.source[l.start + 1]) {
                 'e' => l.checkKeyword(2, "turn", .kw_return),
                 'a' => l.checkKeyword(2, "nge", .kw_range),
@@ -299,7 +310,7 @@ fn identifierType(l: *Lexer) Token.Type {
         else
             .identifier,
 
-        'i' => if (l.current > l.start)
+        'i' => if (l.current > l.start + 1)
             switch (l.source[l.start + 1]) {
                 'n' => l.checkKeyword(2, "t", .kw_int),
                 'f' => .kw_if,
@@ -309,7 +320,7 @@ fn identifierType(l: *Lexer) Token.Type {
         else
             .identifier,
 
-        'f' => if (l.current > l.start)
+        'f' => if (l.current > l.start + 1)
             switch (l.source[l.start + 1]) {
                 'l' => l.checkKeyword(2, "oat", .kw_float),
                 'a' => l.checkKeyword(2, "lse", .kw_false),
@@ -320,7 +331,7 @@ fn identifierType(l: *Lexer) Token.Type {
         else
             .identifier,
 
-        't' => if (l.current > l.start and l.source[l.start + 1] == 'r')
+        't' => if (l.current > l.start + 2 and l.source[l.start + 1] == 'r')
             switch (l.source[l.start + 2]) {
                 'u' => l.checkKeyword(3, "e", .kw_true),
                 'y' => .kw_try,
@@ -656,13 +667,15 @@ test "more tokens" {
             },
         },
         .{
-            .source = "int float bool string struct print",
+            .source = "int float bool string struct break continue print",
             .expected = &.{
                 testToken("int", .kw_int),
                 testToken("float", .kw_float),
                 testToken("bool", .kw_bool),
                 testToken("string", .kw_string),
                 testToken("struct", .kw_struct),
+                testToken("break", .kw_break),
+                testToken("continue", .kw_continue),
                 testToken("print", .kw_print),
                 testToken("", .eof),
             },
