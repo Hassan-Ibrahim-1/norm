@@ -1763,3 +1763,215 @@ test "if statements" {
         try testing.expectEqualStrings(expected_str, result);
     }
 }
+
+test "for loops" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        expected: Value,
+    } = &.{
+        .{
+            .source =
+            \\n := 6;
+            \\
+            \\mut fact := 1;
+            \\for mut i := n; i > 0; i -= 1 {
+            \\    fact *= i;
+            \\}
+            \\
+            \\print(fact);
+            ,
+            .expected = .{ .integer = 720 },
+        },
+        .{
+            .source =
+            \\n := 6;
+            \\
+            \\mut fact := 1;
+            \\for mut i := n; i > 0; {
+            \\    fact *= i;
+            \\    i -= 1;
+            \\}
+            \\
+            \\print(fact);
+            ,
+            .expected = .{ .integer = 720 },
+        },
+        .{
+            .source =
+            \\n := 6;
+            \\
+            \\mut fact := 1;
+            \\mut i := n;
+            \\for i > 0 {
+            \\    fact *= i;
+            \\    i -= 1;
+            \\}
+            \\
+            \\print(fact);
+            ,
+            .expected = .{ .integer = 720 },
+        },
+        .{
+            .source =
+            \\n := 6;
+            \\
+            \\mut fact := 1;
+            \\mut i := n;
+            \\for {
+            \\    if i <= 0 {
+            \\         break;
+            \\    }
+            \\    fact *= i;
+            \\    i -= 1;
+            \\}
+            \\
+            \\print(fact);
+            ,
+            .expected = .{ .integer = 720 },
+        },
+        .{
+            .source =
+            \\n := 6;
+            \\
+            \\mut fact := 1;
+            \\mut i := n;
+            \\for {
+            \\    if i > 0 {
+            \\        fact *= i;
+            \\        i -= 1;
+            \\    } else {
+            \\         break;
+            \\    }
+            \\}
+            \\
+            \\print(fact);
+            ,
+            .expected = .{ .integer = 720 },
+        },
+        .{
+            .source =
+            \\n := 6;
+            \\
+            \\mut fact := 1;
+            \\mut i := n;
+            \\for {
+            \\    if i == 6 {
+            \\         i -= 1;
+            \\         continue;
+            \\    }
+            \\    if i > 0 {
+            \\        fact *= i;
+            \\        i -= 1;
+            \\    } else {
+            \\         break;
+            \\    }
+            \\}
+            \\
+            \\print(fact);
+            ,
+            .expected = .{ .integer = 120 },
+        },
+        .{
+            .source =
+            \\n := 6;
+            \\
+            \\mut fact := 1;
+            \\for mut i := n; i > 0; i -= 1 {
+            \\    if i == 6 {
+            \\         continue;
+            \\    }
+            \\    fact *= i;
+            \\}
+            \\
+            \\print(fact);
+            ,
+            .expected = .{ .integer = 120 },
+        },
+        .{
+            .source =
+            \\n := 6;
+            \\
+            \\mut fact := 1;
+            \\for mut i := n; i > 0; i -= 1 {
+            \\    if i == 6 {
+            \\         i -= 1;
+            \\         continue;
+            \\    }
+            \\    fact *= i;
+            \\}
+            \\
+            \\print(fact);
+            ,
+            .expected = .{ .integer = 24 },
+        },
+        .{
+            .source =
+            \\n := 6;
+            \\
+            \\mut fact := 1;
+            \\mut i := n;
+            \\for i > 0 {
+            \\    if i == 6 {
+            \\         i -= 1;
+            \\         continue;
+            \\    }
+            \\    fact *= i;
+            \\    i -= 1;
+            \\}
+            \\
+            \\print(fact);
+            ,
+            .expected = .{ .integer = 120 },
+        },
+
+        .{
+            .source =
+            \\{
+            \\    fib := 10;
+            \\    mut prev := 0;
+            \\    mut curr := 1;
+            \\    for mut i := 2; i <= fib; i += 1 {
+            \\        next := prev + curr;
+            \\        prev = curr;
+            \\        curr = next;
+            \\    }
+            \\    print(curr);
+            \\}
+            ,
+            .expected = .{ .integer = 55 },
+        },
+        .{
+            .source =
+            \\{
+            \\    fib := 10;
+            \\    mut prev := 0;
+            \\    mut curr := 1;
+            \\    for mut i := 2; i <= fib; {
+            \\        next := prev + curr;
+            \\        prev = curr;
+            \\        curr = next;
+            \\        i += 1;
+            \\    }
+            \\    print(curr);
+            \\}
+            ,
+            .expected = .{ .integer = 55 },
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const result = try testRunPrint(gpa, t.source);
+        defer gpa.free(result);
+
+        var temp_writer: Io.Writer.Allocating = .init(gpa);
+        defer temp_writer.deinit();
+
+        try temp_writer.writer.print("{f}\n", .{t.expected});
+        const expected_str = temp_writer.written();
+
+        try testing.expectEqualStrings(expected_str, result);
+    }
+}

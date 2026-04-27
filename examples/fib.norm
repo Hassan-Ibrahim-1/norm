@@ -1,5 +1,5 @@
 {
-    fib := 92;
+    fib := 10;
     mut prev := 0;
     mut curr := 1;
 
