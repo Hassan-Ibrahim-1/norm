@@ -198,12 +198,11 @@ const Parser = struct {
         };
     }
 
+    /// if return value is .init, you must call p.consumeSemicolon
     fn forInit(p: *Parser) union(enum) {
         cond: *Ast.Expr,
         init: ?Ast.Stmt.For.InitializerStmt,
     } {
-        defer p.consumeSemicolon();
-
         if (p.check(.semicolon)) return .{ .init = null };
 
         if (p.check(.identifier)) {
@@ -275,6 +274,8 @@ const Parser = struct {
                 };
             },
             .init => |initializer| {
+                p.consumeSemicolon();
+
                 const condition = p.expression(.lowest);
                 p.consumeSemicolon();
                 const increment = p.forIncr();
@@ -572,8 +573,6 @@ const Parser = struct {
 
     fn consume(p: *Parser, expected: Token.Type, msg: []const u8) void {
         if (p.match(expected)) return;
-
-        if (expected == .semicolon) @panic("here");
 
         p.reportError(.{
             .error_msg = msg,

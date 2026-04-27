@@ -165,8 +165,6 @@ pub const SymbolTable = struct {
         }
     }
 
-    // x := 1
-
     /// If the return value is null then it means that the symbol
     /// has already been defined.
     pub fn findOrRegister(st: *SymbolTable, name: []const u8, mutable: bool) ?*Symbol {
@@ -359,6 +357,7 @@ pub const Stmt = union(enum) {
 
     pub const ConditionFor = struct {
         token: Token, // for
+        scope: *Scope,
         condition: *Expr,
         block: Block,
 
@@ -369,10 +368,29 @@ pub const Stmt = union(enum) {
 
     pub const InfiniteFor = struct {
         token: Token, // for
+        scope: *Scope,
         block: Block,
 
         pub fn format(f: *const InfiniteFor, w: *Io.Writer) Io.Writer.Error!void {
             try w.print("for {f}", .{f.block});
+        }
+    };
+
+    pub const Break = struct {
+        token: Token,
+        jump_scope: *Scope,
+
+        pub fn format(_: *const Break, w: *Io.Writer) Io.Writer.Error!void {
+            try w.writeAll("break;");
+        }
+    };
+
+    pub const Continue = struct {
+        token: Token,
+        jump_scope: *Scope,
+
+        pub fn format(_: *const Continue, w: *Io.Writer) Io.Writer.Error!void {
+            try w.writeAll("continue;");
         }
     };
 
@@ -386,6 +404,8 @@ pub const Stmt = union(enum) {
     for_stmt: For,
     condition_for: ConditionFor,
     infinite_for: InfiniteFor,
+    break_stmt: Break,
+    continue_stmt: Continue,
     print: Print,
 
     pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {

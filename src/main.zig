@@ -24,11 +24,11 @@ pub fn main(init: std.process.Init) !void {
     const stdin = Io.File.stdin();
     _ = stdin; // autofix
 
-    var stdout_buf: [1024]u8 = undefined;
+    var stdout_buf: [128]u8 = undefined;
     var stdout_w = Io.File.stdout().writer(io, &stdout_buf);
     const stdout = &stdout_w.interface;
 
-    var stderr_buf: [1024]u8 = undefined;
+    var stderr_buf: [128]u8 = undefined;
     var stderr_w = Io.File.stderr().writer(io, &stderr_buf);
     const stderr = &stderr_w.interface;
 

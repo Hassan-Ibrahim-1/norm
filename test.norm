@@ -1,4 +1,13 @@
-for mut i := 0; i < 10; i += 1 {
-    i += 1;
+for mut i := 5; i >= 0; i -= 1 {
+    mut j := 0;
+    for {
+        if j > 3 {
+            break;
+        }
+        print(j);
+        j += 1;
+    }
+    print("------");
     print(i);
+    print("------");
 }

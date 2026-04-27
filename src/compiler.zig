@@ -239,18 +239,23 @@ pub const Compiler = struct {
 
     current_scope: *Nir.Scope,
 
+    // (scope, list of jump indexes to patch)
+    unpatched_jump_stmts: std.AutoHashMapUnmanaged(*Nir.Scope, std.ArrayList(usize)),
+
     fn init(gpa: Allocator, scratch: Allocator, nir: *Nir, chunk: *Chunk) Compiler {
         return .{
             .gpa = gpa,
             .scratch = scratch,
             .current_scope = nir.sym_table.top_scope,
             .compiling_chunk = chunk,
+            .unpatched_jump_stmts = .empty,
             .sym_table = &nir.sym_table,
             .stmts = nir.stmts,
         };
     }
 
     fn deinit(c: *Compiler) void {
+        c.unpatched_jump_stmts.deinit(c.scratch);
         c.* = undefined;
     }
 
@@ -356,12 +361,47 @@ pub const Compiler = struct {
                 c.emitLoop(loop_index, for_stmt.block.token.line);
                 c.patchJump(jump_index);
             },
-            .condition_for => |f| {
-                _ = f; // autofix
+
+            .condition_for => |condition_for| {
+                c.beginScope(condition_for.scope);
+                defer c.endScope(condition_for.block.token.line);
+
+                const loop_index = c.compiling_chunk.code.items.len;
+                c.expression(condition_for.condition);
+                const jump_index = c.emitJump(.op_jump_if_false, condition_for.token.line);
+
+                c.statement(.{ .block = condition_for.block });
+
+                c.emitLoop(loop_index, condition_for.block.token.line);
+                c.patchJump(jump_index);
             },
-            .infinite_for => |f| {
-                _ = f; // autofix
-                unreachable;
+
+            .infinite_for => |infinite_for| {
+                c.beginScope(infinite_for.scope);
+                defer c.endScope(infinite_for.block.token.line);
+
+                const loop_index = c.compiling_chunk.code.items.len;
+
+                c.statement(.{ .block = infinite_for.block });
+
+                c.emitLoop(loop_index, infinite_for.block.token.line);
+            },
+
+            .break_stmt => |break_stmt| {
+                const jump_index = c.emitJump(.op_jump, break_stmt.token.line);
+                const gop = c.unpatched_jump_stmts.getOrPut(c.scratch, break_stmt.jump_scope) catch oom();
+                if (!gop.found_existing) {
+                    gop.value_ptr.* = .empty;
+                }
+                gop.value_ptr.append(c.scratch, jump_index) catch oom();
+            },
+            .continue_stmt => |continue_stmt| {
+                const jump_index = c.emitJump(.op_jump, continue_stmt.token.line);
+                const gop = c.unpatched_jump_stmts.getOrPut(c.scratch, continue_stmt.jump_scope) catch oom();
+                if (!gop.found_existing) {
+                    gop.value_ptr.* = .empty;
+                }
+                gop.value_ptr.append(c.scratch, jump_index) catch oom();
             },
         }
     }
@@ -402,6 +442,15 @@ pub const Compiler = struct {
         defer c.current_scope = c.current_scope.parent;
         const locals = c.sym_table.locals.get(c.current_scope).?;
         const local_count = locals.locals.count();
+
+        const kv_maybe = c.unpatched_jump_stmts.fetchRemove(c.current_scope);
+        if (kv_maybe) |kv| {
+            var stmts = kv.value;
+            defer stmts.deinit(c.scratch);
+            for (stmts.items) |stmt| {
+                c.patchJump(stmt);
+            }
+        }
 
         switch (local_count) {
             0 => {},
@@ -1954,7 +2003,7 @@ test "full for loops" {
                 .op_add_int,
                 .op_store, 0, 0,
                 .op_pop,
-                .op_loop, 23, 0,
+                .op_loop, 26, 0,
 
                 .op_pop,
 
@@ -1964,6 +2013,525 @@ test "full for loops" {
         },
     };
     // zig fmt: on
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        errdefer {
+            var stderr = Io.File.stderr().writer(testing.io, &.{});
+            debug.disassembleChunk(&stderr.interface, &chunk, "output chunk", t.source);
+        }
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "condition for loops" {
+    @setEvalBranchQuota(10000);
+    const gpa = testing.allocator;
+    // zig fmt: off
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source =
+            \\mut i := 0;
+            \\for i < 10 {
+            \\    print(i);
+            \\    i += 1;
+            \\}
+            ,
+            .expected_code = &debug.opCodeToBytes(&.{
+                // mut i := 0
+                .op_constant, 0,
+
+                // i < 10
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_less_int,
+                .op_jump_if_false, 17, 0,
+
+                // print(i)
+                .op_load, 0, 0,
+                .op_temp_print,
+
+                // i += 1
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+
+                .op_loop, 26, 0,
+
+                .op_return,
+            }),
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 10 }, .{ .integer = 1 } },
+        },
+    };
+    // zig fmt: on
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        errdefer {
+            var stderr = Io.File.stderr().writer(testing.io, &.{});
+            debug.disassembleChunk(&stderr.interface, &chunk, "output chunk", t.source);
+        }
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "infinite for loops" {
+    @setEvalBranchQuota(10000);
+    const gpa = testing.allocator;
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source =
+            \\for {
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_loop, 3, 0,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{},
+        },
+        .{
+            .source =
+            \\for {
+            \\    print(1);
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                // print(1)
+                .op_constant, 0,
+                .op_temp_print,
+
+                .op_loop, 6, 0,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{.{ .integer = 1 }},
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        errdefer {
+            var stderr = Io.File.stderr().writer(testing.io, &.{});
+            debug.disassembleChunk(&stderr.interface, &chunk, "output chunk", t.source);
+        }
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "break statements" {
+    @setEvalBranchQuota(10000);
+    const gpa = testing.allocator;
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source =
+            \\for {
+            \\    break;
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_jump, 3, 0,
+
+                .op_loop, 6, 0,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{},
+        },
+        .{
+            .source =
+            \\mut i := 0;
+            \\for {
+            \\    if i >= 3 {
+            \\        break;
+            \\    }
+            \\    i += 1;
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_greater_equal_int,
+                .op_jump_if_false, 3, 0,
+
+                // break
+                .op_jump, 13, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+                
+                .op_loop, 25, 0,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 3 }, .{ .integer = 1 } },
+        },
+        .{
+            .source =
+            \\mut i := 0;
+            \\for i < 3 {
+            \\    if i >= 3 {
+            \\        break;
+            \\    }
+            \\    i += 1;
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_less_int,
+                .op_jump_if_false, 25, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_greater_equal_int,
+                .op_jump_if_false, 3, 0,
+
+                // break
+                .op_jump, 13, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 3,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+                
+                .op_loop, 34, 0,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 3 }, .{ .integer = 3 }, .{ .integer = 1 } },
+        },
+        .{
+            .source =
+            \\for mut i := 0; i < 3; i += 1 {
+            \\    if i >= 3 {
+            \\        break;
+            \\    }
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_less_int,
+                .op_jump_if_false, 25, 0,
+
+
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_greater_equal_int,
+                .op_jump_if_false, 3, 0,
+
+                // break
+                .op_jump, 13, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 3,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+
+                .op_loop, 34, 0,
+
+                .op_pop,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 3 }, .{ .integer = 3 }, .{ .integer = 1 } },
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        errdefer {
+            var stderr = Io.File.stderr().writer(testing.io, &.{});
+            debug.disassembleChunk(&stderr.interface, &chunk, "output chunk", t.source);
+        }
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
+test "continue statements" {
+    @setEvalBranchQuota(10000);
+    const gpa = testing.allocator;
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source =
+            \\for {
+            \\    continue;
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_jump, 0, 0,
+
+                .op_loop, 6, 0,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{},
+        },
+        .{
+            .source =
+            \\mut i := 0;
+            \\for {
+            \\    if i >= 3 {
+            \\        continue;
+            \\    }
+            \\    i += 1;
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_greater_equal_int,
+                .op_jump_if_false, 3, 0,
+
+                // continue
+                .op_jump, 10, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+                
+                .op_loop, 25, 0,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 3 }, .{ .integer = 1 } },
+        },
+        .{
+            .source =
+            \\mut i := 0;
+            \\for i < 3 {
+            \\    if i >= 3 {
+            \\        continue;
+            \\    }
+            \\    i += 1;
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_less_int,
+                .op_jump_if_false, 25, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_greater_equal_int,
+                .op_jump_if_false, 3, 0,
+
+                // continue
+                .op_jump, 10, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 3,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+                
+                .op_loop, 34, 0,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 3 }, .{ .integer = 3 }, .{ .integer = 1 } },
+        },
+        .{
+            .source =
+            \\for mut i := 0; i < 3; i += 1 {
+            \\    if i >= 3 {
+            \\        continue;
+            \\    }
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_less_int,
+                .op_jump_if_false, 25, 0,
+
+
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_greater_equal_int,
+                .op_jump_if_false, 3, 0,
+
+                // continue
+                .op_jump, 0, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 3,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+
+                .op_loop, 34, 0,
+
+                .op_pop,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 3 }, .{ .integer = 3 }, .{ .integer = 1 } },
+        },
+        .{
+            .source =
+            \\mut i := 0; 
+            \\for i < 5 {
+            \\    if i == 3 {
+            \\        i += 1;
+            \\        continue;
+            \\    }
+            \\    print(i);
+            \\    i += 1;
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_less_int,
+                .op_jump_if_false, 39, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_equal_int,
+                .op_jump_if_false, 13, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 3,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+                
+                // continue
+                .op_jump, 14, 0,
+
+                .op_load, 0, 0,
+                .op_temp_print,
+
+                .op_load, 0, 0,
+                .op_constant, 4,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+
+                .op_loop, 48, 0,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 5 }, .{ .integer = 3 }, .{ .integer = 1 }, .{ .integer = 1 } },
+        },
+        .{
+            .source =
+            \\for mut i := 0; i < 5; i += 1 {
+            \\    if i == 3 {
+            \\        continue;
+            \\    }
+            \\    print(i);
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_less_int,
+                .op_jump_if_false, 29, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 2,
+                .op_equal_int,
+                .op_jump_if_false, 3, 0,
+
+                // continue
+                .op_jump, 4, 0,
+
+                .op_load, 0, 0,
+                .op_temp_print,
+
+                .op_load, 0, 0,
+                .op_constant, 3,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+
+                .op_loop, 38, 0,
+
+                .op_pop,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 5 }, .{ .integer = 3 }, .{ .integer = 1 } },
+        },
+    };
 
     for (tests) |t| {
         errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});

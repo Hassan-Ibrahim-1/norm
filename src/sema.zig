@@ -19,14 +19,23 @@ const Sema = struct {
     invalid_expr: *Nir.Expr,
     sym_table: Nir.SymbolTable,
 
-    const TypeMask = u64;
+    /// `level` is `top` if we are not in a for loop
+    current_for_block_scope: *Nir.Scope,
 
-    fn mask(ty: NormType) TypeMask {
+    analyzing_stmt: AnalyzingStmt,
+
+    const AnalyzingStmt = enum {
+        other,
+        for_loop,
+    };
+
+    fn mask(ty: NormType) u64 {
         return @as(u64, 1) << ty.int();
     }
 
+    // TODO: refactor this away
     const cast_map = init: {
-        var m = [_]TypeMask{0} ** @typeInfo(NormType).@"enum".fields.len;
+        var m = [_]u64{0} ** @typeInfo(NormType).@"enum".fields.len;
         m[NormType.n_int.int()] = mask(.n_float);
         m[NormType.n_float.int()] = mask(.n_int);
         break :init m;
@@ -45,11 +54,14 @@ const Sema = struct {
     }
 
     fn init(gpa: Allocator, arena: Allocator) Sema {
+        const sym_table: Nir.SymbolTable = .init(gpa);
         return .{
             .invalid_expr = makeInvalid(arena),
-            .sym_table = .init(gpa),
+            .sym_table = sym_table,
             .arena = arena,
             .errors = .empty,
+            .analyzing_stmt = .other,
+            .current_for_block_scope = sym_table.top_scope,
             .panic_mode = false,
         };
     }
@@ -137,12 +149,14 @@ const Sema = struct {
                 if (value == null) return .invalid;
                 if (sym.type == .n_invalid) sym.type = value.?.type;
 
-                return .{ .var_decl = .{
-                    .ident = vd.ident,
-                    .value = value.?,
-                    .type = sym.type,
-                    .mutable = vd.mutable,
-                } };
+                return .{
+                    .var_decl = .{
+                        .ident = vd.ident,
+                        .value = value.?,
+                        .type = sym.type,
+                        .mutable = vd.mutable,
+                    },
+                };
             },
             .print => |p| {
                 const nir_expr = s.expression(p.expr);
@@ -151,8 +165,16 @@ const Sema = struct {
             .block => |block| {
                 var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
 
+                const previous_for_block_scope = s.current_for_block_scope;
+                defer s.current_for_block_scope = previous_for_block_scope;
+
                 const block_scope = s.beginScope();
                 defer s.endScope();
+
+                if (s.analyzing_stmt == .for_loop) {
+                    s.analyzing_stmt = .other;
+                    s.current_for_block_scope = block_scope;
+                }
 
                 for (block.stmts) |b_stmt| {
                     const nir_stmt = s.statement(b_stmt);
@@ -235,16 +257,34 @@ const Sema = struct {
             },
 
             .infinite_for => |infinite_for| {
+                s.analyzing_stmt = .for_loop;
+
+                const for_scope = s.beginScope();
+                defer s.endScope();
+
                 const nir_block = s.statement(.{ .block = infinite_for.block }).block;
-                return .{ .infinite_for = .{ .token = infinite_for.token, .block = nir_block } };
+
+                return .{
+                    .infinite_for = .{
+                        .token = infinite_for.token,
+                        .scope = for_scope,
+                        .block = nir_block,
+                    },
+                };
             },
 
             .condition_for => |condition_for| {
+                s.analyzing_stmt = .for_loop;
+
+                const for_scope = s.beginScope();
+                defer s.endScope();
+
                 const condition = s.expression(condition_for.condition);
                 const nir_block = s.statement(.{ .block = condition_for.block }).block;
                 return .{
                     .condition_for = .{
                         .token = condition_for.token,
+                        .scope = for_scope,
                         .condition = condition,
                         .block = nir_block,
                     },
@@ -252,7 +292,9 @@ const Sema = struct {
             },
 
             .for_stmt => |for_stmt| {
-                const scope = s.beginScope();
+                s.analyzing_stmt = .for_loop;
+
+                const for_scope = s.beginScope();
                 defer s.endScope();
 
                 const initializer: ?Nir.Stmt.For.InitializerStmt = if (for_stmt.initializer) |i| s: {
@@ -292,11 +334,31 @@ const Sema = struct {
                 return .{
                     .for_stmt = .{
                         .token = for_stmt.token,
-                        .scope = scope,
+                        .scope = for_scope,
                         .initializer = initializer,
                         .condition = condition,
                         .increment = increment,
                         .block = nir_block,
+                    },
+                };
+            },
+            .break_stmt => |break_stmt| {
+                // Parser guarantees that loop control statements can only be present in loops
+                std.debug.assert(s.current_for_block_scope.level != .top);
+                return .{
+                    .break_stmt = .{
+                        .token = break_stmt.token,
+                        .jump_scope = s.current_for_block_scope.parent,
+                    },
+                };
+            },
+            .continue_stmt => |continue_stmt| {
+                // Parser guarantees that loop control statements can only be present in loops
+                std.debug.assert(s.current_for_block_scope.level != .top);
+                return .{
+                    .continue_stmt = .{
+                        .token = continue_stmt.token,
+                        .jump_scope = s.current_for_block_scope,
                     },
                 };
             },
@@ -2449,6 +2511,97 @@ test "for loops" {
             ,
             .expected =
             \\for {
+            \\}
+            ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "loop jump statements" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\for {
+            \\    break;
+            \\}
+            ,
+            .expected =
+            \\for {
+            \\    break;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\for {
+            \\    continue;
+            \\}
+            ,
+            .expected =
+            \\for {
+            \\    continue;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\for mut i := 0; i < 3; i += 1 {
+            \\    if true {
+            \\        break;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\for mut i: int = 0; (i:int < 3):bool; i = (i:int + 1):int; {
+            \\    if true {
+            \\    break;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\for {
+            \\    for {
+            \\        continue;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\for {
+            \\    for {
+            \\    continue;
+            \\}
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\for {
+            \\    for {
+            \\        continue;
+            \\    }
+            \\    break;
+            \\}
+            ,
+            .expected =
+            \\for {
+            \\    for {
+            \\    continue;
+            \\}
+            \\    break;
             \\}
             ,
         },
