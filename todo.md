@@ -34,13 +34,13 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] FIXME: Bug with not popping off constants in the stack with op_store, we use peek here.
 - [x] For loop sema bug
 - [ ] test loop failure cases in parser
-- [ ] c loops, infinite loops, break, continue
-- [ ] nil expr that doesn't get evaluated at all, just a zero value
+- [x] c loops, infinite loops, break, continue
 - [ ] rewrite logical operators to have short circuit behavior
 - [ ] my allocations in sema are absolutely stupid. take for example returning errors as an owned slice
 - [ ] sync points at statement boundaries for parser and sema
 - [ ] functions
 - [ ] native functions / define signature in norm but implementation can be in zig / c
+- [ ] what is this? nil expr that doesn't get evaluated at all, just a zero value
 - [ ] slices and maps
 - [ ] iterator loops
 - [ ] Runtime errors in VM. Division by zero, index out of bounds, etc.
