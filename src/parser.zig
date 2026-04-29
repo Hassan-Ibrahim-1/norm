@@ -87,23 +87,23 @@ const Parser = struct {
         .{ .prefix = string, .infix = null, .precedence = .lowest }, // string
         .{ .prefix = float, .infix = null, .precedence = .lowest }, // float
         .{ .prefix = int, .infix = null, .precedence = .lowest }, // int
-        .{ .prefix = null, .infix = binary, .precedence = ._and }, // _and
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _struct
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _else
-        .{ .prefix = boolean, .infix = null, .precedence = .lowest }, // _false
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _for
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _fn
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _if
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _try
-        .{ .prefix = nil, .infix = null, .precedence = .lowest }, // nil
-        .{ .prefix = null, .infix = binary, .precedence = ._or }, // _or
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _return
-        .{ .prefix = boolean, .infix = null, .precedence = .lowest }, // _true
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // mut
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // import
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _switch
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // _enum
-        .{ .prefix = null, .infix = null, .precedence = .lowest }, // range
+        .{ .prefix = null, .infix = binary, .precedence = ._and }, // kw_and
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_struct
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_else
+        .{ .prefix = boolean, .infix = null, .precedence = .lowest }, // kw_false
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_for
+        .{ .prefix = function, .infix = null, .precedence = .lowest }, // kw_fn
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_if
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_try
+        .{ .prefix = nil, .infix = null, .precedence = .lowest }, // kw_nil
+        .{ .prefix = null, .infix = binary, .precedence = ._or }, // kw_or
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_return
+        .{ .prefix = boolean, .infix = null, .precedence = .lowest }, // kw_true
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_mut
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_import
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_switch
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_enum
+        .{ .prefix = null, .infix = null, .precedence = .lowest }, // kw_range
         .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_int
         .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_float
         .{ .prefix = typeKw, .infix = null, .precedence = .lowest }, // kw_bool
@@ -559,6 +559,46 @@ const Parser = struct {
         return makeIdentifier(p.arena, p.previous);
     }
 
+    fn function(p: *Parser) *Ast.Expr {
+        const token = p.previous;
+        p.consume(.left_paren, "Expected '(' after fn keyword");
+
+        var parameters: std.ArrayList(Ast.Expr.Function.Parameter) = .empty;
+        while (!p.check(.right_paren) and !p.isAtEnd()) {
+            const param_name = p.expression(.lowest);
+            if (param_name.* != .identifier) {
+                const error_msg = std.fmt.allocPrint(
+                    p.arena,
+                    "Expected identifier in parameter list found {f}",
+                    .{param_name},
+                ) catch oom();
+
+                p.reportError(.{
+                    .line = token.line,
+                    .error_msg = error_msg,
+                });
+                return undefined;
+            }
+
+            p.consume(.colon, "Expect ':' after parameter name");
+
+            const param_type = p.expression(.lowest);
+
+            parameters.append(p.arena, .{ .name = param_name, .type = param_type }) catch oom();
+            if (!p.match(.comma)) break;
+        }
+
+        p.consume(.right_paren, "Expected ')' after function parameter list");
+
+        const return_type = if (!p.check(.left_brace)) p.expression(.lowest) else null;
+
+        p.consume(.left_brace, "Expected '{' after return type");
+        const body = p.blockStmt().block;
+
+        const parameter_slice = parameters.toOwnedSlice(p.arena) catch oom();
+        return makeFunction(p.arena, token, parameter_slice, return_type, body);
+    }
+
     fn advance(p: *Parser) void {
         if (p.current_index < p.tokens.len - 1) p.current_index += 1;
 
@@ -668,15 +708,28 @@ pub fn parse(gpa: Allocator, tokens: []Token) Ast {
     };
 }
 
-fn makeGrouping(arena: Allocator, grping: *Ast.Expr, paren: Token) *Ast.Expr {
-    const e = makeExpr(arena);
-    e.* = .{ .grouping = .{ .paren = paren, .expr = grping } };
-    return e;
-}
-
 fn makeIdentifier(arena: Allocator, ident: Token) *Ast.Expr {
     const e = makeExpr(arena);
     e.* = .{ .identifier = .{ .ident = ident } };
+    return e;
+}
+
+fn makeFunction(
+    arena: Allocator,
+    fn_token: Token,
+    parameters: []Ast.Expr.Function.Parameter,
+    return_type: ?*Ast.Expr,
+    body: Ast.Stmt.Block,
+) *Ast.Expr {
+    const e = makeExpr(arena);
+    e.* = .{
+        .function = .{
+            .token = fn_token,
+            .parameters = parameters,
+            .return_type = return_type,
+            .body = body,
+        },
+    };
     return e;
 }
 
@@ -695,6 +748,12 @@ fn makeCast(arena: Allocator, expr: *Ast.Expr, token: Token) *Ast.Expr {
 fn makeBinary(arena: Allocator, left: *Ast.Expr, operator: Token, right: *Ast.Expr) *Ast.Expr {
     const e = makeExpr(arena);
     e.* = .{ .binary = .{ .left = left, .operator = operator, .right = right } };
+    return e;
+}
+
+fn makeGrouping(arena: Allocator, grping: *Ast.Expr, paren: Token) *Ast.Expr {
+    const e = makeExpr(arena);
+    e.* = .{ .grouping = .{ .paren = paren, .expr = grping } };
     return e;
 }
 
@@ -1702,6 +1761,55 @@ test "loop jump stmts" {
             \\}
             \\    break;
             \\}
+            ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testParseStmts(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "functions" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "fn () {}",
+            .expected = "fn () {\n};",
+        },
+        .{
+            .source = "fn (x: int) {}",
+            .expected = "fn (x: int) {\n};",
+        },
+        .{
+            .source = "fn (x: int, y: float) {}",
+            .expected = "fn (x: int, y: float) {\n};",
+        },
+        .{
+            .source = "fn (x: int, y: float) int {}",
+            .expected = "fn (x: int, y: float) int {\n};",
+        },
+        .{
+            .source = "fn (x: int, y: float) float {}",
+            .expected = "fn (x: int, y: float) float {\n};",
+        },
+        .{
+            .source =
+            \\fn (x: int, y: float) float {
+            \\    print(x + y);
+            \\}
+            ,
+            .expected =
+            \\fn (x: int, y: float) float {
+            \\    print((x + y));
+            \\};
             ,
         },
     };

@@ -300,19 +300,21 @@ pub const Expr = union(enum) {
         body: Stmt.Block,
 
         pub const Parameter = struct {
-            name: *Identifier,
+            name: *Expr,
             type: *Expr,
         };
 
         pub fn format(f: *const Function, w: *Io.Writer) Io.Writer.Error!void {
-            try w.writeAll("fn (");
+            try w.print("fn (", .{});
             for (f.parameters, 0..) |param, i| {
                 if (i == f.parameters.len - 1) {
-                    try w.print("{f}: {f}) ", .{ param.name, param.type });
+                    try w.print("{f}: {f}", .{ param.name, param.type });
                 } else {
                     try w.print("{f}: {f}, ", .{ param.name, param.type });
                 }
             }
+
+            try w.print(") ", .{});
 
             if (f.return_type) |return_type| {
                 try w.print("{f} ", .{return_type});
