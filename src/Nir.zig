@@ -185,6 +185,8 @@ pub const NormType = enum {
     n_bool,
     n_string,
 
+    n_function,
+
     pub fn format(nt: NormType, w: *Io.Writer) Io.Writer.Error!void {
         try w.print("{s}", .{@tagName(nt)[2..]});
     }
@@ -394,6 +396,19 @@ pub const Stmt = union(enum) {
         }
     };
 
+    pub const Return = struct {
+        token: Token, // return
+        expr: ?*Expr,
+
+        pub fn format(r: *const Return, w: *Io.Writer) Io.Writer.Error!void {
+            if (r.expr) |expr| {
+                try w.print("return {f};", .{expr});
+            } else {
+                try w.writeAll("return;");
+            }
+        }
+    };
+
     pub const invalid: Stmt = undefined;
 
     expression: Expression,
@@ -406,6 +421,7 @@ pub const Stmt = union(enum) {
     infinite_for: InfiniteFor,
     break_stmt: Break,
     continue_stmt: Continue,
+    return_stmt: Return,
     print: Print,
 
     pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {
@@ -507,6 +523,55 @@ pub const Expr = struct {
         }
     };
 
+    pub const Function = struct {
+        token: Token, // fn
+        parameters: []Parameter,
+        return_type: ?NormType,
+        body: Stmt.Block,
+
+        pub const Parameter = struct {
+            name: []const u8,
+            type: NormType,
+        };
+
+        pub fn format(f: *const Function, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("fn (", .{});
+            for (f.parameters, 0..) |param, i| {
+                if (i == f.parameters.len - 1) {
+                    try w.print("{s}: {f}", .{ param.name, param.type });
+                } else {
+                    try w.print("{s}: {f}, ", .{ param.name, param.type });
+                }
+            }
+
+            try w.print(") ", .{});
+
+            if (f.return_type) |return_type| {
+                try w.print("{f} ", .{return_type});
+            }
+
+            try w.print("{f}", .{f.body});
+        }
+    };
+
+    pub const Call = struct {
+        token: Token, // left_paren
+        callee: *Expr,
+        args: []*Expr,
+
+        pub fn format(c: *const Call, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{f}(", .{c.callee});
+            for (c.args, 0..) |arg, i| {
+                if (i == c.args.len - 1) {
+                    try w.print("{f}", .{arg});
+                } else {
+                    try w.print("{f}, ", .{arg});
+                }
+            }
+            try w.print(")", .{});
+        }
+    };
+
     type: NormType,
     kind: union(enum) {
         binary: Binary,
@@ -515,6 +580,8 @@ pub const Expr = struct {
         grouping: Grouping,
         identifier: Identifier,
         literal: Literal,
+        function: Function,
+        call: Call,
     },
 
     pub const invalid: Expr = .{
@@ -530,12 +597,14 @@ pub const Expr = struct {
             .literal => |*l| l.token,
             .identifier => |*i| i.ident,
             .grouping => |*g| g.paren,
+            .function => |*f| f.token,
+            .call => |*c| c.token,
         };
     }
 
     pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
         if (expr.type == .n_invalid) {
-            @panic("found invalid type - an error was not reported");
+            @panic("found invalid type - an error was not reported in sema");
         }
 
         try switch (expr.kind) {

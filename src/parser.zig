@@ -183,10 +183,23 @@ const Parser = struct {
             const stmt = p.loopJumpStmt();
             p.consumeSemicolon();
             return stmt;
+        } else if (p.match(.kw_return)) {
+            const ret = p.returnStmt();
+            p.consumeSemicolon();
+            return ret;
         }
         const expr = p.expressionStmt();
         p.consumeSemicolon();
         return expr;
+    }
+
+    fn returnStmt(p: *Parser) Ast.Stmt {
+        const return_tok = p.previous;
+        if (p.check(.semicolon)) {
+            return .{ .return_stmt = .{ .token = return_tok, .expr = null } };
+        }
+        const expr = p.expression(.lowest);
+        return .{ .return_stmt = .{ .token = return_tok, .expr = expr } };
     }
 
     fn loopJumpStmt(p: *Parser) Ast.Stmt {
@@ -565,12 +578,11 @@ const Parser = struct {
 
         var parameters: std.ArrayList(Ast.Expr.Function.Parameter) = .empty;
         while (!p.check(.right_paren) and !p.isAtEnd()) {
-            const param_name = p.expression(.lowest);
-            if (param_name.* != .identifier) {
+            if (!p.match(.identifier)) {
                 const error_msg = std.fmt.allocPrint(
                     p.arena,
-                    "Expected identifier in parameter list found {f}",
-                    .{param_name},
+                    "Expected identifier in parameter list found {s}",
+                    .{p.previous.lexeme},
                 ) catch oom();
 
                 p.reportError(.{
@@ -580,11 +592,11 @@ const Parser = struct {
                 return undefined;
             }
 
+            const param_name = p.previous;
             p.consume(.colon, "Expect ':' after parameter name");
-
             const param_type = p.expression(.lowest);
 
-            parameters.append(p.arena, .{ .name = param_name, .type = param_type }) catch oom();
+            parameters.append(p.arena, .{ .name = param_name.lexeme, .type = param_type }) catch oom();
             if (!p.match(.comma)) break;
         }
 
@@ -674,11 +686,18 @@ const Parser = struct {
         return false;
     }
 
+    fn returnStmtOutsideFn(p: *Parser, token: Token) void {
+        p.reportError(.{
+            .error_msg = "Return statement outside a function",
+            .line = token.line,
+        });
+    }
+
     fn jumpStmtOutsideLoop(p: *Parser, token: Token) void {
         p.reportError(.{
             .error_msg = switch (token.type) {
-                .kw_break => "Found break statement outside a loop",
-                .kw_continue => "Found continue statement outside a loop",
+                .kw_break => "Break statement outside a loop",
+                .kw_continue => "continue statement outside a loop",
                 else => unreachable,
             },
             .line = token.line,
@@ -1727,18 +1746,6 @@ test "loop jump stmts" {
         .{
             .source =
             \\for {
-            \\    break;
-            \\}
-            ,
-            .expected =
-            \\for {
-            \\    break;
-            \\}
-            ,
-        },
-        .{
-            .source =
-            \\for {
             \\    continue;
             \\}
             ,
@@ -1887,6 +1894,59 @@ test "calls" {
         .{
             .source = "2 + add(2,3) * add(3,2)",
             .expected = "(2 + (add(2, 3) * add(3, 2)));",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testParseStmts(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "return stmt" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\fn () {
+            \\    return;
+            \\};
+            ,
+            .expected =
+            \\fn () {
+            \\    return;
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\fn () int {
+            \\    return add(2, 3);
+            \\};
+            ,
+            .expected =
+            \\fn () int {
+            \\    return add(2, 3);
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\fn (a: int, b: int) int {
+            \\    return a + b;
+            \\};
+            ,
+            .expected =
+            \\fn (a: int, b: int) int {
+            \\    return (a + b);
+            \\};
+            ,
         },
     };
 

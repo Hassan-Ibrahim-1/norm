@@ -390,6 +390,8 @@ const Sema = struct {
             .grouping => |*g| s.grouping(g),
             .identifier => |*i| s.identifier(i),
             .literal => |*l| s.literal(l),
+            .function => |*f| s.function(f),
+            .call => |*c| s.call(c),
         };
     }
 
@@ -598,6 +600,24 @@ const Sema = struct {
             .nil => @panic("todo"),
         };
         return makeLiteral(s.arena, .fromAst(l.value), l.token, ty);
+    }
+
+    fn function(s: *Sema, f: *Ast.Expr.Function) *Nir.Expr {
+        var parameter: std.ArrayList(Nir.Expr.Function.Parameter) = .empty;
+        for (f.parameters) |param| {
+            const param_type = s.analyzeTypeExpr(param.type);
+            parameter.append(s.arena, .{ .name = param.name, .type = param_type }) catch oom();
+        }
+
+        const return_type =
+            if (f.return_type) |return_type| s.analyzeTypeExpr(return_type) else null;
+        _ = return_type; // autofix
+    }
+
+    fn call(s: *Sema, c: *Ast.Expr.Call) *Nir.Expr {
+        _ = s; // autofix
+        _ = c; // autofix
+
     }
 
     fn expectType(

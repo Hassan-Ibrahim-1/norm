@@ -187,6 +187,19 @@ pub const Stmt = union(enum) {
         }
     };
 
+    pub const Return = struct {
+        token: Token, // return
+        expr: ?*Expr,
+
+        pub fn format(r: *const Return, w: *Io.Writer) Io.Writer.Error!void {
+            if (r.expr) |expr| {
+                try w.print("return {f};", .{expr});
+            } else {
+                try w.writeAll("return;");
+            }
+        }
+    };
+
     pub const Print = struct {
         print: Token,
         expr: *Expr,
@@ -206,6 +219,7 @@ pub const Stmt = union(enum) {
     infinite_for: InfiniteFor,
     break_stmt: Break,
     continue_stmt: Continue,
+    return_stmt: Return,
     print: Print,
 
     pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {
@@ -300,7 +314,7 @@ pub const Expr = union(enum) {
         body: Stmt.Block,
 
         pub const Parameter = struct {
-            name: *Expr,
+            name: []const u8,
             type: *Expr,
         };
 
@@ -308,9 +322,9 @@ pub const Expr = union(enum) {
             try w.print("fn (", .{});
             for (f.parameters, 0..) |param, i| {
                 if (i == f.parameters.len - 1) {
-                    try w.print("{f}: {f}", .{ param.name, param.type });
+                    try w.print("{s}: {f}", .{ param.name, param.type });
                 } else {
-                    try w.print("{f}: {f}, ", .{ param.name, param.type });
+                    try w.print("{s}: {f}, ", .{ param.name, param.type });
                 }
             }
 
