@@ -56,7 +56,7 @@ const Parser = struct {
     };
 
     const parse_rules = [_]ParseRule{
-        .{ .prefix = grouping, .infix = null, .precedence = .lowest }, // left_paren
+        .{ .prefix = grouping, .infix = call, .precedence = .call }, // left_paren
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // right_paren
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // left_brace
         .{ .prefix = null, .infix = null, .precedence = .lowest }, // right_brace
@@ -599,6 +599,22 @@ const Parser = struct {
         return makeFunction(p.arena, token, parameter_slice, return_type, body);
     }
 
+    fn call(p: *Parser, left: *Ast.Expr) *Ast.Expr {
+        const left_paren = p.previous;
+
+        var args: std.ArrayList(*Ast.Expr) = .empty;
+        while (!p.check(.right_paren) and !p.isAtEnd()) {
+            const arg = p.expression(.lowest);
+            args.append(p.arena, arg) catch oom();
+            if (!p.match(.comma)) break;
+        }
+
+        p.consume(.right_paren, "Expect ')' after argument list");
+
+        const arg_slice = args.toOwnedSlice(p.arena) catch oom();
+        return makeCall(p.arena, left, left_paren, arg_slice);
+    }
+
     fn advance(p: *Parser) void {
         if (p.current_index < p.tokens.len - 1) p.current_index += 1;
 
@@ -733,6 +749,23 @@ fn makeFunction(
     return e;
 }
 
+fn makeCall(
+    arena: Allocator,
+    callee: *Ast.Expr,
+    left_paren: Token,
+    args: []*Ast.Expr,
+) *Ast.Expr {
+    const e = makeExpr(arena);
+    e.* = .{
+        .call = .{
+            .token = left_paren,
+            .callee = callee,
+            .args = args,
+        },
+    };
+    return e;
+}
+
 fn makeUnary(arena: Allocator, expr: *Ast.Expr, operator: Token) *Ast.Expr {
     const e = makeExpr(arena);
     e.* = .{ .unary = .{ .expr = expr, .operator = operator } };
@@ -814,6 +847,8 @@ fn testParseStmts(gpa: Allocator, source: []const u8) ![]const u8 {
         dbg("ast.errors", ast.errors);
         return error.ParserError;
     }
+
+    // dbg("ast", ast.stmts);
 
     return debug.printStmts(gpa, ast.stmts);
 }
@@ -1811,6 +1846,47 @@ test "functions" {
             \\    print((x + y));
             \\};
             ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testParseStmts(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "calls" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source = "hey()",
+            .expected = "hey();",
+        },
+        .{
+            .source = "add(2, 3)",
+            .expected = "add(2, 3);",
+        },
+        .{
+            .source = "add(2+2, 3)",
+            .expected = "add((2 + 2), 3);",
+        },
+        .{
+            .source = "counter()()",
+            .expected = "counter()();",
+        },
+        .{
+            .source = "add(2,3) * add(3,2)",
+            .expected = "(add(2, 3) * add(3, 2));",
+        },
+        .{
+            .source = "2 + add(2,3) * add(3,2)",
+            .expected = "(2 + (add(2, 3) * add(3, 2)));",
         },
     };
 

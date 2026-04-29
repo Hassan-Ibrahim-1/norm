@@ -325,6 +325,7 @@ pub const Expr = union(enum) {
     };
 
     pub const Call = struct {
+        token: Token, //left_paren
         callee: *Expr,
         args: []*Expr,
 
@@ -332,11 +333,12 @@ pub const Expr = union(enum) {
             try w.print("{f}(", .{c.callee});
             for (c.args, 0..) |arg, i| {
                 if (i == c.args.len - 1) {
-                    try w.print("{f})", .{arg});
+                    try w.print("{f}", .{arg});
                 } else {
                     try w.print("{f}, ", .{arg});
                 }
             }
+            try w.print(")", .{});
         }
     };
 
@@ -358,7 +360,7 @@ pub const Expr = union(enum) {
             .literal => |b| b.token,
             .identifier => |b| b.ident,
             .function => |b| b.token,
-            .call => |b| b.callee.token(),
+            .call => |b| b.token,
         };
     }
 
