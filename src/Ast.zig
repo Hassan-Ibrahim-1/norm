@@ -293,12 +293,59 @@ pub const Expr = union(enum) {
         }
     };
 
+    pub const Function = struct {
+        token: Token, // fn
+        parameters: []Parameter,
+        return_type: ?*Expr,
+        body: Stmt.Block,
+
+        pub const Parameter = struct {
+            name: *Identifier,
+            type: *Expr,
+        };
+
+        pub fn format(f: *const Function, w: *Io.Writer) Io.Writer.Error!void {
+            try w.writeAll("fn (");
+            for (f.parameters, 0..) |param, i| {
+                if (i == f.parameters.len - 1) {
+                    try w.print("{f}: {f}) ", .{ param.name, param.type });
+                } else {
+                    try w.print("{f}: {f}, ", .{ param.name, param.type });
+                }
+            }
+
+            if (f.return_type) |return_type| {
+                try w.print("{f} ", .{return_type});
+            }
+
+            try w.print("{f}", .{f.body});
+        }
+    };
+
+    pub const Call = struct {
+        callee: *Expr,
+        args: []*Expr,
+
+        pub fn format(c: *const Call, w: *Io.Writer) Io.Writer.Error!void {
+            try w.print("{f}(", .{c.callee});
+            for (c.args, 0..) |arg, i| {
+                if (i == c.args.len - 1) {
+                    try w.print("{f})", .{arg});
+                } else {
+                    try w.print("{f}, ", .{arg});
+                }
+            }
+        }
+    };
+
     binary: Binary,
     unary: Unary,
     cast: Cast,
     grouping: Grouping,
     literal: Literal,
     identifier: Identifier,
+    function: Function,
+    call: Call,
 
     pub fn token(e: *const Expr) Token {
         return switch (e.*) {
@@ -308,6 +355,8 @@ pub const Expr = union(enum) {
             .grouping => |b| b.paren,
             .literal => |b| b.token,
             .identifier => |b| b.ident,
+            .function => |b| b.token,
+            .call => |b| b.callee.token(),
         };
     }
 

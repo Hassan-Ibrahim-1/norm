@@ -1,8 +1,9 @@
-n := 6;
+add := fn (a: int, b: int) int {
+    return a + b;
+} 
 
-mut fact := 1;
-for mut i := n; i > 0; i -= 1 {
-    fact *= i;
+main := fn () {
+    x := add(3, 2);
+    print(x);
 }
 
-print(fact);

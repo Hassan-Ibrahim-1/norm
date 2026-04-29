@@ -344,7 +344,7 @@ const Parser = struct {
     }
 
     fn blockStmt(p: *Parser) Ast.Stmt {
-        const token = p.previous;
+        const left_brace = p.previous;
         var stmts: std.ArrayList(Ast.Stmt) = .empty;
 
         while (!p.check(.right_brace) and !p.isAtEnd()) {
@@ -358,7 +358,7 @@ const Parser = struct {
         return .{
             .block = .{
                 .stmts = stmts.items,
-                .token = token,
+                .token = left_brace,
                 .end_token = end_token,
             },
         };
