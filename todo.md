@@ -34,6 +34,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] FIXME: Bug with not popping off constants in the stack with op_store, we use peek here.
 - [x] For loop sema bug
 - [x] c loops, infinite loops, break, continue
+- [ ] infer type for all global variables before analyzing function bodies.
 - [ ] functions
 - [ ] function type syntax
 - [ ] rewrite logical operators to have short circuit behavior
