@@ -403,6 +403,8 @@ pub const Compiler = struct {
                 }
                 gop.value_ptr.append(c.scratch, jump_index) catch oom();
             },
+
+            .return_stmt => @panic("todo"),
         }
     }
 
@@ -480,6 +482,8 @@ pub const Compiler = struct {
             .grouping => |*g| c.grouping(g),
             .literal => |*l| c.literal(l),
             .identifier => |*i| c.identifier(i),
+            .call => @panic("todo"),
+            .function => @panic("todo"),
         }
     }
 

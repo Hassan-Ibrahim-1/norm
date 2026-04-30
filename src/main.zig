@@ -80,16 +80,16 @@ pub fn main(init: std.process.Init) !void {
     var stderr_w = Io.File.stderr().writer(io, &stderr_buf);
     const stderr = &stderr_w.interface;
 
+    defer {
+        stderr.flush() catch unreachable;
+        stdout.flush() catch unreachable;
+    }
+
     const arg_slice = try init.minimal.args.toSlice(init.arena.allocator());
     const args = parseArgs(arg_slice, stderr) catch |err| switch (err) {
         error.BadArgs => return,
         else => return err,
     };
-
-    defer {
-        stderr.flush() catch unreachable;
-        stdout.flush() catch unreachable;
-    }
 
     try runFile(io, alloc, args.file, stdout, stderr, args.action);
 }
@@ -123,6 +123,7 @@ fn runFile(io: Io, gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr:
     }
     if (action == .parse) {
         const stmts = debug.printStmts(gpa, ast.stmts);
+        defer gpa.free(stmts);
         try stderr.print("{s}\n", .{stmts});
         return;
     }
@@ -135,6 +136,7 @@ fn runFile(io: Io, gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr:
     }
     if (action == .analyze) {
         const stmts = debug.printStmts(gpa, nir.stmts);
+        defer gpa.free(stmts);
         try stderr.print("{s}\n", .{stmts});
         return;
     }

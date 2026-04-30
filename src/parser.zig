@@ -146,7 +146,9 @@ const Parser = struct {
             if (p.checkNextEither(&.{ .colon, .colon_equal })) {
                 p.advance();
                 const var_decl = p.varDecl(false);
-                p.consumeSemicolon();
+                if (var_decl.var_decl.value != null and var_decl.var_decl.value.?.* != .function) {
+                    p.consumeSemicolon();
+                }
                 return var_decl;
             } else if (p.checkNextEither(&.{ .plus_equal, .minus_equal, .star_equal, .slash_equal })) {
                 p.advance();
@@ -156,7 +158,9 @@ const Parser = struct {
             } else if (p.checkNext(.equal)) {
                 p.advance();
                 const var_assign = p.varAssign();
-                p.consumeSemicolon();
+                if (var_assign.var_assign.value.* != .function) {
+                    p.consumeSemicolon();
+                }
                 return var_assign;
             }
         } else if (p.match(.kw_mut)) {

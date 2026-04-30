@@ -92,6 +92,11 @@ const Sema = struct {
         };
     }
 
+    fn inferType(s: *Sema, expr: *Ast.Expr) NormType {
+        _ = s; // autofix
+        switch (expr.*) {}
+    }
+
     fn analyzeGlobalSymbols(s: *Sema, stmts: []Ast.Stmt) void {
         for (stmts) |stmt| {
             switch (stmt) {
@@ -157,6 +162,10 @@ const Sema = struct {
                 // Why would value every be null? This should be an error no?
                 if (value == null) return .invalid;
                 if (sym.type == .n_invalid) sym.type = value.?.type;
+                if (sym.type == .n_void) {
+                    s.voidAssignErr(vd.ident);
+                    return .invalid;
+                }
 
                 return .{
                     .var_decl = .{
@@ -243,7 +252,7 @@ const Sema = struct {
                 }
 
                 const sym = s.sym_table.tryFind(va.ident.lexeme) orelse {
-                    s.undefinedVariable(va.ident);
+                    s.undefinedVariableErr(va.ident);
                     return .invalid;
                 };
                 if (!sym.mutable) {
@@ -577,18 +586,22 @@ const Sema = struct {
 
     fn identifier(s: *Sema, i: *Ast.Expr.Identifier) *Nir.Expr {
         const sym = s.sym_table.tryFind(i.ident.lexeme) orelse {
-            s.undefinedVariable(i.ident);
+            s.undefinedVariableErr(i.ident);
             return s.invalid_expr;
         };
         if (sym.type == .n_invalid and sym.scope.level == .top) {
-            return s.useBeforeDefinition(i.ident);
+            return s.useBeforeDefinitionErr(i.ident);
         }
 
         return makeIdentifier(s.arena, i.ident, sym.scope, sym.type);
     }
 
-    fn undefinedVariable(s: *Sema, name: Token) void {
+    fn undefinedVariableErr(s: *Sema, name: Token) void {
         s.reportErrorLine(name.line, "Undefined variable {s}", .{name.lexeme});
+    }
+
+    fn voidAssignErr(s: *Sema, ident: Token) void {
+        s.reportErrorLine(ident.line, "Type void is not assignable", .{});
     }
 
     fn redefinedVariableErr(s: *Sema, name: Token) void {
@@ -599,10 +612,10 @@ const Sema = struct {
         );
     }
 
-    fn useBeforeDefinition(s: *Sema, name: Token) *Nir.Expr {
+    fn useBeforeDefinitionErr(s: *Sema, name: Token) *Nir.Expr {
         s.reportErrorLine(
             name.line,
-            "Variable {s} used before it's definition",
+            "Variable {s} used before its definition",
             .{name.lexeme},
         );
         return s.invalid_expr;
@@ -660,11 +673,11 @@ const Sema = struct {
 
         const body = s.statement(.{ .block = f.body }).block;
 
-        // dbg("errors", s.errors.items);
-
-        const always_returns = alwaysReturns(body.stmts);
-        if (!always_returns) {
-            return s.alwaysReturnsErr(return_type, f.token);
+        if (return_type != .n_void) {
+            const always_returns = alwaysReturns(body.stmts);
+            if (!always_returns) {
+                return s.alwaysReturnsErr(return_type, f.token);
+            }
         }
 
         return makeFunction(s.arena, f.token, scope, parameters, return_type, body);
@@ -1643,7 +1656,7 @@ test "global declaration order error" {
     } = &.{
         .{
             .source = "x := z; z := 1;",
-            .error_msg = "Variable z used before it's definition",
+            .error_msg = "Variable z used before its definition",
         },
     };
 
@@ -2832,6 +2845,18 @@ test "functions, calls, and return stmts" {
         },
         .{
             .source =
+            \\fn (a: int, b: int) int {
+            \\    return a + b;
+            \\}
+            ,
+            .expected =
+            \\fn (a: int, b: int) int {
+            \\    return (a:int + b:int):int;
+            \\};
+            ,
+        },
+        .{
+            .source =
             \\add := fn (a: int, b: int) int {
             \\    return a + b;
             \\}
@@ -2846,12 +2871,36 @@ test "functions, calls, and return stmts" {
         },
         .{
             .source =
-            \\fn (a: int, b: int) int {
+            \\add := fn (a: int, b: int) int {
+            \\    return a + b;
+            \\}
+            \\x := fn () int {
+            \\    return add(2,3);
+            \\}
+            ,
+            .expected =
+            \\add: function = fn (a: int, b: int) int {
+            \\    return (a:int + b:int):int;
+            \\};
+            \\x: function = fn () int {
+            \\    return add(2, 3):int;
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\x := fn () int {
+            \\    return add(2,3);
+            \\}
+            \\add := fn (a: int, b: int) int {
             \\    return a + b;
             \\}
             ,
             .expected =
-            \\fn (a: int, b: int) int {
+            \\x: function = fn () int {
+            \\    return add(2, 3):int;
+            \\};
+            \\add: function = fn (a: int, b: int) int {
             \\    return (a:int + b:int):int;
             \\};
             ,
