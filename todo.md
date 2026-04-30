@@ -35,6 +35,7 @@ compiler should also convert (1 + 2.0) to (1.0 + 2.0)
 - [x] For loop sema bug
 - [x] c loops, infinite loops, break, continue
 - [ ] functions
+- [ ] function type syntax
 - [ ] rewrite logical operators to have short circuit behavior
 - [ ] disallow statements in global scope that are not var decl
 - [ ] test failure cases in parser

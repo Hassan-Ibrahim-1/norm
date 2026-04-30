@@ -37,6 +37,10 @@ pub inline fn isEnum(T: type, t: anytype) bool {
     return false;
 }
 
+pub fn eqlTag(a: anytype, b: @TypeOf(a)) bool {
+    return meta.activeTag(a) == meta.activeTag(b);
+}
+
 pub fn SmallestEnumBackingType(T: type) type {
     return std.math.IntFittingRange(0, @typeInfo(T).@"enum".fields.len - 1);
 }

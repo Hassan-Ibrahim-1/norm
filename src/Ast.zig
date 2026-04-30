@@ -314,7 +314,7 @@ pub const Expr = union(enum) {
         body: Stmt.Block,
 
         pub const Parameter = struct {
-            name: []const u8,
+            name: Token,
             type: *Expr,
         };
 
@@ -322,9 +322,9 @@ pub const Expr = union(enum) {
             try w.print("fn (", .{});
             for (f.parameters, 0..) |param, i| {
                 if (i == f.parameters.len - 1) {
-                    try w.print("{s}: {f}", .{ param.name, param.type });
+                    try w.print("{s}: {f}", .{ param.name.lexeme, param.type });
                 } else {
-                    try w.print("{s}: {f}, ", .{ param.name, param.type });
+                    try w.print("{s}: {f}, ", .{ param.name.lexeme, param.type });
                 }
             }
 

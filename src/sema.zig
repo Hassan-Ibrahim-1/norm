@@ -7,6 +7,7 @@ const Ast = @import("Ast.zig");
 const debug = @import("debug.zig");
 const ers = @import("errors.zig");
 const Token = @import("Lexer.zig").Token;
+const eqlTag = @import("trait.zig").eqlTag;
 
 const Nir = @import("Nir.zig");
 const NormType = Nir.NormType;
@@ -24,29 +25,33 @@ const Sema = struct {
 
     analyzing_stmt: AnalyzingStmt,
 
-    const AnalyzingStmt = enum {
+    /// `n_invalid` if in global scope
+    function_type: NormType,
+
+    const AnalyzingStmt = union(enum) {
         other,
         for_loop,
     };
 
     fn mask(ty: NormType) u64 {
-        return @as(u64, 1) << ty.int();
+        return @as(u64, 1) << @intFromEnum(std.meta.activeTag(ty));
     }
 
     // TODO: refactor this away
     const cast_map = init: {
-        var m = [_]u64{0} ** @typeInfo(NormType).@"enum".fields.len;
-        m[NormType.n_int.int()] = mask(.n_float);
-        m[NormType.n_float.int()] = mask(.n_int);
+        var m = [_]u64{0} ** @typeInfo(NormType).@"union".fields.len;
+        const Tag = NormType.Tag;
+        m[@intFromEnum(Tag.n_int)] = mask(.n_float);
+        m[@intFromEnum(Tag.n_float)] = mask(.n_int);
         break :init m;
     };
 
     fn canCast(ty: NormType, target: NormType) bool {
-        return (cast_map[ty.int()] & mask(target)) != 0;
+        return (cast_map[@intFromEnum(std.meta.activeTag(ty))] & mask(target)) != 0;
     }
 
     fn commonType(l: NormType, r: NormType) NormType {
-        if (l == r) return l;
+        if (eqlTag(l, r)) return l;
         if (l.isNumeric() or r.isNumeric()) {
             return .n_float;
         }
@@ -63,6 +68,7 @@ const Sema = struct {
             .analyzing_stmt = .other,
             .current_for_block_scope = sym_table.top_scope,
             .panic_mode = false,
+            .function_type = .n_invalid,
         };
     }
 
@@ -78,7 +84,10 @@ const Sema = struct {
             .kw_string => .n_string,
             .kw_bool => .n_bool,
 
-            .identifier => @panic("todo"),
+            .identifier => {
+                dbg("expr", expr);
+                @panic("TODO");
+            },
             else => unreachable,
         };
     }
@@ -94,7 +103,7 @@ const Sema = struct {
                             .n_invalid;
                     const already_exists = s.sym_table.register(vd.ident.lexeme, var_type, vd.mutable);
                     if (already_exists) {
-                        s.redefinedVariable(vd.ident);
+                        s.redefinedVariableErr(vd.ident);
                     }
                 },
                 else => {},
@@ -136,7 +145,7 @@ const Sema = struct {
             },
             .var_decl => |vd| {
                 const sym = s.sym_table.findOrRegister(vd.ident.lexeme, vd.mutable) orelse {
-                    s.redefinedVariable(vd.ident);
+                    s.redefinedVariableErr(vd.ident);
                     return .invalid;
                 };
 
@@ -163,8 +172,6 @@ const Sema = struct {
                 return .{ .print = .{ .print = p.print, .expr = nir_expr } };
             },
             .block => |block| {
-                var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
-
                 const previous_for_block_scope = s.current_for_block_scope;
                 defer s.current_for_block_scope = previous_for_block_scope;
 
@@ -176,14 +183,14 @@ const Sema = struct {
                     s.current_for_block_scope = block_scope;
                 }
 
-                for (block.stmts) |b_stmt| {
-                    const nir_stmt = s.statement(b_stmt);
-                    nir_stmts.append(s.arena, nir_stmt) catch oom();
+                var nir_stmts = s.arena.alloc(Nir.Stmt, block.stmts.len) catch oom();
+                for (block.stmts, 0..) |b_stmt, i| {
+                    nir_stmts[i] = s.statement(b_stmt);
                 }
                 return .{
                     .block = .{
                         .token = block.token,
-                        .stmts = nir_stmts.items,
+                        .stmts = nir_stmts,
                         .scope = block_scope,
                         .end_token = block.end_token,
                     },
@@ -362,6 +369,16 @@ const Sema = struct {
                     },
                 };
             },
+
+            .return_stmt => |return_stmt| {
+                const nir_expr = if (return_stmt.expr) |expr| s.expression(expr) else null;
+                const return_type = if (nir_expr) |expr| expr.type else .n_void;
+                if (!eqlTag(return_type, s.function_type)) {
+                    s.wrongReturnType(return_type, s.function_type, return_stmt.token);
+                    return .invalid;
+                }
+                return .{ .return_stmt = .{ .token = return_stmt.token, .expr = nir_expr } };
+            },
         }
     }
 
@@ -382,6 +399,23 @@ const Sema = struct {
         return .n_invalid;
     }
 
+    fn alwaysReturnsErr(s: *Sema, return_type: NormType, token: Token) *Nir.Expr {
+        s.reportErrorLine(
+            token.line,
+            "Function does not return {f} in every branch",
+            .{return_type},
+        );
+        return s.invalid_expr;
+    }
+
+    fn wrongReturnType(s: *Sema, actual: NormType, expected: NormType, token: Token) void {
+        s.reportErrorLine(
+            token.line,
+            "Expected function to return {f}, instead got {f}",
+            .{ expected, actual },
+        );
+    }
+
     fn expression(s: *Sema, expr: *Ast.Expr) *Nir.Expr {
         return switch (expr.*) {
             .binary => |*b| s.binary(b),
@@ -396,7 +430,7 @@ const Sema = struct {
     }
 
     fn tryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
-        if (expr.type == target) return expr;
+        if (eqlTag(expr.type, target)) return expr;
         const arena = s.arena;
         if (canCast(expr.type, target)) {
             return makeAnonCast(arena, expr, target);
@@ -405,7 +439,7 @@ const Sema = struct {
     }
 
     fn expectTypeTryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
-        if (expr.type == target or target == .n_invalid) return expr;
+        if (eqlTag(expr.type, target) or target == .n_invalid) return expr;
         const casted = s.tryCast(expr, target) orelse {
             s.reportError(expr, "Expected {f} got {f}", .{ target, expr.type });
             return null;
@@ -557,7 +591,7 @@ const Sema = struct {
         s.reportErrorLine(name.line, "Undefined variable {s}", .{name.lexeme});
     }
 
-    fn redefinedVariable(s: *Sema, name: Token) void {
+    fn redefinedVariableErr(s: *Sema, name: Token) void {
         s.reportErrorLine(
             name.line,
             "Variable {s} is already defined",
@@ -603,21 +637,104 @@ const Sema = struct {
     }
 
     fn function(s: *Sema, f: *Ast.Expr.Function) *Nir.Expr {
-        var parameter: std.ArrayList(Nir.Expr.Function.Parameter) = .empty;
-        for (f.parameters) |param| {
+        const previous_fn_type = s.function_type;
+        defer s.function_type = previous_fn_type;
+
+        const scope = s.beginScope();
+        defer s.endScope();
+
+        const parameters = s.arena.alloc(Nir.Expr.Function.Parameter, f.parameters.len) catch oom();
+        for (f.parameters, 0..) |param, i| {
             const param_type = s.analyzeTypeExpr(param.type);
-            parameter.append(s.arena, .{ .name = param.name, .type = param_type }) catch oom();
+            parameters[i] = .{ .name = param.name, .type = param_type };
+            const already_exists = s.sym_table.register(param.name.lexeme, param_type, false);
+            if (already_exists) {
+                s.redefinedVariableErr(param.name);
+                return s.invalid_expr;
+            }
         }
 
         const return_type =
-            if (f.return_type) |return_type| s.analyzeTypeExpr(return_type) else null;
-        _ = return_type; // autofix
+            if (f.return_type) |return_type| s.analyzeTypeExpr(return_type) else .n_void;
+        s.function_type = return_type;
+
+        const body = s.statement(.{ .block = f.body }).block;
+
+        // dbg("errors", s.errors.items);
+
+        const always_returns = alwaysReturns(body.stmts);
+        if (!always_returns) {
+            return s.alwaysReturnsErr(return_type, f.token);
+        }
+
+        return makeFunction(s.arena, f.token, scope, parameters, return_type, body);
+    }
+
+    fn alwaysReturns(stmts: []Nir.Stmt) bool {
+        for (stmts) |stmt| {
+            switch (stmt) {
+                .if_stmt => |if_stmt| {
+                    if (if_stmt.else_block) |else_block| {
+                        const else_returns = alwaysReturns(else_block.stmts);
+                        if (else_returns) return true;
+                    }
+                },
+                .block => |block| {
+                    const always_returns = alwaysReturns(block.stmts);
+                    if (always_returns) return true;
+                },
+                .return_stmt => return true,
+                // TODO: we can guarantee returns here but only if there is no
+                // preceding control statements in the loop
+                .infinite_for => {},
+                else => {},
+            }
+        }
+        return false;
     }
 
     fn call(s: *Sema, c: *Ast.Expr.Call) *Nir.Expr {
-        _ = s; // autofix
-        _ = c; // autofix
+        const callee = s.expression(c.callee);
+        if (callee.type != .n_function) {
+            return s.expectedFunctionCallee(callee.type, c.token);
+        }
 
+        // how do i actually access the function declaration? I only need
+        // the type of the function nothing else, maybe I can add some info
+        // to n_function in NormType like parameter list, return type etc.
+        const callee_fn = callee.type.n_function;
+        if (c.args.len != callee_fn.parameters.len) {
+            return s.badArgumentLength(c.args.len, callee_fn.parameters.len, c.token);
+        }
+
+        const args = s.arena.alloc(*Nir.Expr, c.args.len) catch oom();
+        for (c.args, 0..) |arg, i| {
+            args[i] = s.expression(arg);
+            if (!eqlTag(args[i].type, callee_fn.parameters[i].type)) {
+                return s.badArgumentType(i + 1, args[i].type, callee_fn.parameters[i].type, c.token);
+            }
+        }
+
+        return makeCall(s.arena, callee, c.token, args);
+    }
+
+    fn expectedFunctionCallee(s: *Sema, callee_type: NormType, token: Token) *Nir.Expr {
+        s.reportErrorLine(token.line, "Expected callee to be a function but got {f} instead", .{callee_type});
+        return s.invalid_expr;
+    }
+
+    fn badArgumentLength(s: *Sema, actual: usize, expected: usize, token: Token) *Nir.Expr {
+        s.reportErrorLine(token.line, "Expected {} arguments but got {} instead", .{ expected, actual });
+        return s.invalid_expr;
+    }
+
+    fn badArgumentType(s: *Sema, arg_location: usize, actual: NormType, expected: NormType, token: Token) *Nir.Expr {
+        s.reportErrorLine(
+            token.line,
+            "Expected argument {} to be of type {f} but got {f} instead",
+            .{ arg_location, expected, actual },
+        );
+        return s.invalid_expr;
     }
 
     fn expectType(
@@ -627,7 +744,7 @@ const Sema = struct {
         comptime error_msg: []const u8,
         args: anytype,
     ) bool {
-        if (expr.type == ty) return true;
+        if (eqlTag(expr.type, ty)) return true;
         s.reportError(expr, error_msg, args);
         return false;
     }
@@ -713,6 +830,53 @@ pub fn analyze(gpa: Allocator, ast: *Ast) Nir {
 
 fn oom() noreturn {
     @panic("oom");
+}
+
+fn makeCall(
+    arena: Allocator,
+    callee: *Nir.Expr,
+    left_paren: Token,
+    args: []*Nir.Expr,
+) *Nir.Expr {
+    const e = makeExpr(arena);
+    e.* = .{
+        .kind = .{
+            .call = .{
+                .token = left_paren,
+                .callee = callee,
+                .args = args,
+            },
+        },
+        .type = callee.type.n_function.return_type,
+    };
+    return e;
+}
+
+fn makeFunction(
+    arena: Allocator,
+    fn_token: Token,
+    scope: *Nir.Scope,
+    parameters: []Nir.Expr.Function.Parameter,
+    return_type: NormType,
+    body: Nir.Stmt.Block,
+) *Nir.Expr {
+    const e = makeExpr(arena);
+    const ty = arena.create(NormType.Function) catch oom();
+    ty.* = .{
+        .parameters = parameters,
+        .return_type = return_type,
+    };
+    e.* = .{
+        .kind = .{
+            .function = .{
+                .token = fn_token,
+                .scope = scope,
+                .body = body,
+            },
+        },
+        .type = .{ .n_function = ty },
+    };
+    return e;
 }
 
 fn makeIdentifier(arena: Allocator, ident: Token, scope: *Nir.Scope, ty: NormType) *Nir.Expr {
@@ -2623,6 +2787,73 @@ test "loop jump statements" {
             \\}
             \\    break;
             \\}
+            ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "functions, calls, and return stmts" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\fn () {
+            \\    return;
+            \\}
+            ,
+            .expected =
+            \\fn () {
+            \\    return;
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\add := fn (a: int, b: int) int {
+            \\    return a + b;
+            \\}
+            ,
+            .expected =
+            \\add: function = fn (a: int, b: int) int {
+            \\    return (a:int + b:int):int;
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\add := fn (a: int, b: int) int {
+            \\    return a + b;
+            \\}
+            \\x := add(2, 3);
+            ,
+            .expected =
+            \\add: function = fn (a: int, b: int) int {
+            \\    return (a:int + b:int):int;
+            \\};
+            \\x: int = add(2, 3):int;
+            ,
+        },
+        .{
+            .source =
+            \\fn (a: int, b: int) int {
+            \\    return a + b;
+            \\}
+            ,
+            .expected =
+            \\fn (a: int, b: int) int {
+            \\    return (a:int + b:int):int;
+            \\};
             ,
         },
     };

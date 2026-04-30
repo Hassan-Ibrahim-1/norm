@@ -596,7 +596,7 @@ const Parser = struct {
             p.consume(.colon, "Expect ':' after parameter name");
             const param_type = p.expression(.lowest);
 
-            parameters.append(p.arena, .{ .name = param_name.lexeme, .type = param_type }) catch oom();
+            parameters.append(p.arena, .{ .name = param_name, .type = param_type }) catch oom();
             if (!p.match(.comma)) break;
         }
 

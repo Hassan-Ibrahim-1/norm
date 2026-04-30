@@ -177,15 +177,23 @@ pub const SymbolTable = struct {
     }
 };
 
-pub const NormType = enum {
+pub const NormType = union(enum) {
+    pub const Function = struct {
+        parameters: []Expr.Function.Parameter,
+        return_type: NormType,
+    };
+
+    pub const Tag = std.meta.Tag(NormType);
+
     n_invalid,
 
     n_int,
     n_float,
     n_bool,
     n_string,
+    n_void,
 
-    n_function,
+    n_function: *Function,
 
     pub fn format(nt: NormType, w: *Io.Writer) Io.Writer.Error!void {
         try w.print("{s}", .{@tagName(nt)[2..]});
@@ -223,10 +231,6 @@ pub const NormType = enum {
             .n_int, .n_float => true,
             else => false,
         };
-    }
-
-    pub fn int(ty: NormType) trait.SmallestEnumBackingType(NormType) {
-        return @intFromEnum(ty);
     }
 };
 
@@ -525,29 +529,28 @@ pub const Expr = struct {
 
     pub const Function = struct {
         token: Token, // fn
-        parameters: []Parameter,
-        return_type: ?NormType,
+        scope: *Scope,
         body: Stmt.Block,
 
         pub const Parameter = struct {
-            name: []const u8,
+            name: Token,
             type: NormType,
         };
 
-        pub fn format(f: *const Function, w: *Io.Writer) Io.Writer.Error!void {
+        pub fn format(f: *const Function, ty: *const NormType.Function, w: *Io.Writer) Io.Writer.Error!void {
             try w.print("fn (", .{});
-            for (f.parameters, 0..) |param, i| {
-                if (i == f.parameters.len - 1) {
-                    try w.print("{s}: {f}", .{ param.name, param.type });
+            for (ty.parameters, 0..) |param, i| {
+                if (i == ty.parameters.len - 1) {
+                    try w.print("{s}: {f}", .{ param.name.lexeme, param.type });
                 } else {
-                    try w.print("{s}: {f}, ", .{ param.name, param.type });
+                    try w.print("{s}: {f}, ", .{ param.name.lexeme, param.type });
                 }
             }
 
             try w.print(") ", .{});
 
-            if (f.return_type) |return_type| {
-                try w.print("{f} ", .{return_type});
+            if (ty.return_type != .n_void) {
+                try w.print("{f} ", .{ty.return_type});
             }
 
             try w.print("{f}", .{f.body});
@@ -608,6 +611,14 @@ pub const Expr = struct {
         }
 
         try switch (expr.kind) {
+            .function => |f| f.format(expr.type.n_function, w),
+            .identifier => |*i| {
+                if (expr.type == .n_function) {
+                    try w.print("{f}", .{i});
+                } else {
+                    try w.print("{f}:{f}", .{ i, expr.type });
+                }
+            },
             inline .cast, .literal => |l| w.print("{f}", .{l}),
             inline else => |b| w.print("{f}:{f}", .{ b, expr.type }),
         };
