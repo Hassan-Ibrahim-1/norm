@@ -92,20 +92,57 @@ const Sema = struct {
         };
     }
 
-    fn inferType(s: *Sema, expr: *Ast.Expr) NormType {
-        _ = s; // autofix
-        switch (expr.*) {}
+    fn inferGlobalType(s: *Sema, expr: *Ast.Expr) NormType {
+        return switch (expr.*) {
+            .binary => |*b| s.binary(b),
+            .unary => |*u| s.unary(u),
+            .cast => |*c| s.cast(c),
+            .grouping => |*g| s.grouping(g),
+            .identifier => |*i| s.identifier(i),
+            .literal => |*l| s.literal(l),
+            .function => |*f| s.analyzeFunctionSignature(f),
+            .call => |*c| t: {
+                s.globalCallError(c.token);
+                break :t .n_invalid;
+            },
+        };
+    }
+
+    fn globalCallError(s: *Sema, token: Token) void {
+        s.reportErrorLine(token.line, "Cannot call functions at compile time", .{});
+    }
+
+    fn analyzeFunctionSignature(s: *Sema, f: *Ast.Expr.Function) NormType {
+        const parameters = s.arena.alloc(Nir.Expr.Function.Parameter, f.parameters.len) catch oom();
+        for (f.parameters, 0..) |param, i| {
+            const param_type = s.analyzeTypeExpr(param.type);
+            parameters[i] = .{ .name = param.name, .type = param_type };
+        }
+
+        const return_type =
+            if (f.return_type) |return_type| s.analyzeTypeExpr(return_type) else .n_void;
+
+        const ty = s.arena.create(NormType.Function) catch oom();
+        ty.* = .{
+            .parameters = parameters,
+            .return_type = return_type,
+        };
+        return ty;
     }
 
     fn analyzeGlobalSymbols(s: *Sema, stmts: []Ast.Stmt) void {
         for (stmts) |stmt| {
             switch (stmt) {
+                // TODO: figure out how to be able to handle circular dependencies
+                // I want variables to be able to refer to each other.
+                // Main problem right now is that functions can't refer to each
+                // other in their bodies. Everything else seems fine, just need
+                // to write tests and then work on codegen and vm support for functions
                 .var_decl => |vd| {
-                    const var_type =
-                        if (vd.type_expr) |type_expr|
-                            s.analyzeTypeExpr(type_expr)
-                        else
-                            .n_invalid;
+                    if (vd.type_expr) |type_expr| {
+                        const var_type = s.analyzeTypeExpr(type_expr);
+                        _ = var_type; // autofix
+                    }
                     const already_exists = s.sym_table.register(vd.ident.lexeme, var_type, vd.mutable);
                     if (already_exists) {
                         s.redefinedVariableErr(vd.ident);
@@ -465,8 +502,8 @@ const Sema = struct {
             .plus => {
                 if (left.type.isNumeric() and right.type.isNumeric()) {
                     const common_type = commonType(left.type, right.type);
-                    const cast_left = s.tryCast(left, common_type) orelse return s.castError(left, common_type);
-                    const cast_right = s.tryCast(right, common_type) orelse return s.castError(right, common_type);
+                    const cast_left = s.tryCast(left, common_type) orelse return s.castErr(left, common_type);
+                    const cast_right = s.tryCast(right, common_type) orelse return s.castErr(right, common_type);
                     return makeBinary(arena, cast_left, b.operator, cast_right, common_type);
                 }
                 if (left.type.isString() and right.type.isString()) {
@@ -477,8 +514,8 @@ const Sema = struct {
             .minus, .star => {
                 if (left.type.isNumeric() and right.type.isNumeric()) {
                     const common_type = commonType(left.type, right.type);
-                    const cast_left = s.tryCast(left, common_type) orelse return s.castError(left, common_type);
-                    const cast_right = s.tryCast(right, common_type) orelse return s.castError(right, common_type);
+                    const cast_left = s.tryCast(left, common_type) orelse return s.castErr(left, common_type);
+                    const cast_right = s.tryCast(right, common_type) orelse return s.castErr(right, common_type);
                     return makeBinary(arena, cast_left, b.operator, cast_right, common_type);
                 }
                 return s.invalidBinaryOp(left, b.operator, right);
@@ -496,24 +533,24 @@ const Sema = struct {
             .equal_equal, .bang_equal => {
                 if (left.type.isComparable() and right.type.isComparable()) {
                     const common_type = commonType(left.type, right.type);
-                    const cast_left = s.tryCast(left, common_type) orelse s.compareError(left, right);
-                    const cast_right = s.tryCast(right, common_type) orelse s.compareError(left, right);
+                    const cast_left = s.tryCast(left, common_type) orelse s.compareErr(left, right);
+                    const cast_right = s.tryCast(right, common_type) orelse s.compareErr(left, right);
                     return makeBinary(arena, cast_left, b.operator, cast_right, .n_bool);
                 }
-                return s.compareError(left, right);
+                return s.compareErr(left, right);
             },
             .greater, .greater_equal, .less, .less_equal => {
                 if (left.type.isOrderable() and right.type.isOrderable()) {
                     const common_type = commonType(left.type, right.type);
-                    const cast_left = s.tryCast(left, common_type) orelse s.compareError(left, right);
-                    const cast_right = s.tryCast(right, common_type) orelse s.compareError(left, right);
+                    const cast_left = s.tryCast(left, common_type) orelse s.compareErr(left, right);
+                    const cast_right = s.tryCast(right, common_type) orelse s.compareErr(left, right);
                     return makeBinary(arena, cast_left, b.operator, cast_right, .n_bool);
                 }
-                return s.compareError(left, right);
+                return s.compareErr(left, right);
             },
             .kw_and, .kw_or => {
                 if (left.type != .n_bool or right.type != .n_bool) {
-                    return s.compareError(left, right);
+                    return s.compareErr(left, right);
                 }
                 return makeBinary(arena, left, b.operator, right, .n_bool);
             },
@@ -521,11 +558,11 @@ const Sema = struct {
         }
     }
 
-    fn castError(s: *Sema, expr: *Nir.Expr, target: NormType) *Nir.Expr {
+    fn castErr(s: *Sema, expr: *Nir.Expr, target: NormType) *Nir.Expr {
         return s.reportErrorInv(expr, "Cannot cast {f} to {f}", .{ expr.type, target });
     }
 
-    fn compareError(s: *Sema, left: *Nir.Expr, right: *Nir.Expr) *Nir.Expr {
+    fn compareErr(s: *Sema, left: *Nir.Expr, right: *Nir.Expr) *Nir.Expr {
         return s.reportErrorInv(left, "Cannot compare {f} and {f}.", .{ left.type, right.type });
     }
 
