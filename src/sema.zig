@@ -138,6 +138,10 @@ const Sema = struct {
                 // Main problem right now is that functions can't refer to each
                 // other in their bodies. Everything else seems fine, just need
                 // to write tests and then work on codegen and vm support for functions
+                //
+                // What I need exactly is to be able to infer the type of each global declaration
+                // before analyze function bodies. The main problem here is just finding circular
+                // dependencies.
                 .var_decl => |vd| {
                     if (vd.type_expr) |type_expr| {
                         const var_type = s.analyzeTypeExpr(type_expr);
