@@ -1,8 +1,0 @@
-n := 6;
-
-mut fact := 1;
-for mut i := n; i > 0; i -= 1 {
-    fact *= i;
-}
-
-print(fact);

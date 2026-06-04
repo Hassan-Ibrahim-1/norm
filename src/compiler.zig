@@ -2281,6 +2281,58 @@ test "break statements" {
             // zig fmt: on
             .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 3 }, .{ .integer = 3 }, .{ .integer = 1 } },
         },
+        .{
+            .source =
+            \\for mut i := 0; i < 3; i += 1 {
+            \\    x := 2;
+            \\    if i >= 3 {
+            \\        break;
+            \\    }
+            \\    print(x + i);
+            \\}
+            ,
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+
+                .op_load, 0, 0,
+                .op_constant, 1,
+                .op_less_int,
+                .op_jump_if_false, 36, 0,
+
+                // x := 2
+                .op_constant, 2,
+
+                .op_load, 0, 0,
+                .op_constant, 3,
+                .op_greater_equal_int,
+                .op_jump_if_false, 3, 0,
+
+                // break
+                .op_jump, 22, 0,
+                
+                .op_load, 1, 0,
+                .op_load, 0, 0,
+                .op_add_int,
+                .op_temp_print,
+
+                // i += 1
+                .op_load, 0, 0,
+                .op_constant, 4,
+                .op_add_int,
+                .op_store, 0, 0,
+                .op_pop,
+
+                .op_loop, 45, 0,
+
+                .op_pop,
+                .op_pop,
+
+                .op_return,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 2 }, .{ .integer = 3 }, .{ .integer = 3 }, .{ .integer = 1 } },
+        },
     };
 
     for (tests) |t| {
