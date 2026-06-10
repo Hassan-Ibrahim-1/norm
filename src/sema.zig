@@ -1985,7 +1985,7 @@ test "variable assignment" {
             .source =
             \\mut x := 10;
             \\{
-            \\    x = 3;   
+            \\    x = 3;
             \\}
             ,
             .expected =
@@ -1998,7 +1998,7 @@ test "variable assignment" {
         .{
             .source =
             \\{
-            \\    x = 3;   
+            \\    x = 3;
             \\}
             \\mut x := 10;
             ,
