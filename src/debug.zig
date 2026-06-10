@@ -114,10 +114,12 @@ pub fn disassembleInstruction(
 
         .op_jump,
         .op_jump_if_false,
-        .op_loop,
         => jumpInstruction(w, instruction, chunk, offset),
 
-        .op_pop_n => popNInstruction(w, instruction, chunk, offset),
+        .op_loop,
+        => loopInstruction(w, instruction, chunk, offset),
+
+        .op_pop_n => popNInstructions(w, instruction, chunk, offset),
     };
 }
 
@@ -190,15 +192,18 @@ fn jumpInstruction(
     offset: usize,
 ) Io.Writer.Error!usize {
     const jump_offset = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
+    std.debug.print("\n", .{});
     dbg("jump_offset", jump_offset);
     dbg("offset", offset);
-    const jump_instruction: OpCode = @enumFromInt(chunk.code.items[offset + jump_offset]);
-    const line = chunk.lines.items[offset + jump_offset];
+    const instruction_index = offset + jump_offset + 3;
+    const jump_instruction: OpCode = @enumFromInt(chunk.code.items[instruction_index]);
+    const line = chunk.lines.items[instruction_index];
     try w.print(
-        "{t:<16} -> {d:>4}, jumping to '{t}' on line {d}\n",
+        "{t:<16} {d:>4} -> {d} '{t}' on line {d}\n",
         .{
             instruction,
             jump_offset,
+            instruction_index,
             jump_instruction,
             line,
         },
@@ -206,20 +211,40 @@ fn jumpInstruction(
     return offset + 3;
 }
 
-fn popNInstruction(
+fn loopInstruction(
+    w: *Io.Writer,
+    instruction: OpCode,
+    chunk: *const Chunk,
+    offset: usize,
+) Io.Writer.Error!usize {
+    const jump_offset = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
+    std.debug.print("\n", .{});
+    dbg("jump_offset", jump_offset);
+    dbg("offset", offset);
+    const instruction_index = offset - jump_offset + 3;
+    const jump_instruction: OpCode = @enumFromInt(chunk.code.items[instruction_index]);
+    const line = chunk.lines.items[instruction_index];
+    try w.print(
+        "{t:<16} {d:>4} -> {d} '{t}' on line {d}\n",
+        .{
+            instruction,
+            jump_offset,
+            instruction_index,
+            jump_instruction,
+            line,
+        },
+    );
+    return offset + 3;
+}
+
+fn popNInstructions(
     w: *Io.Writer,
     instruction: OpCode,
     chunk: *const Chunk,
     offset: usize,
 ) Io.Writer.Error!usize {
     const n = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
-    try w.print(
-        "{t:<16} {d:>4}\n",
-        .{
-            instruction,
-            n,
-        },
-    );
+    try w.print("{t:<16} {d:>4}\n", .{ instruction, n });
     return offset + 3;
 }
 
