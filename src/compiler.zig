@@ -2352,21 +2352,18 @@ test "break statements" {
         var chunk = try testCompile(gpa, t.source);
         defer chunk.deinit();
 
-        errdefer {
-            var stderr = Io.File.stderr().writer(testing.io, &.{});
-            debug.disassembleChunk(&stderr.interface, &chunk, "output chunk", t.source);
+        var stderr = Io.File.stderr().writer(testing.io, &.{});
+        stderr.interface.writeByte('\n') catch {};
 
-            stderr.interface.writeByte('\n') catch {};
+        var expected_chunk = debug.parseChunk(
+            std.testing.allocator,
+            t.expected_code,
+            t.expected_constants,
+            &.{},
+        );
+        defer expected_chunk.deinit();
 
-            var expected_chunk = debug.parseChunk(
-                std.testing.allocator,
-                t.expected_code,
-                t.expected_constants,
-                &.{},
-            );
-            debug.disassembleChunk(&stderr.interface, &expected_chunk, "expected chunk", t.source);
-            expected_chunk.deinit();
-        }
+        try debug.expectEqualChunks(&stderr.interface, expected_chunk, chunk, t.source);
 
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
         try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);

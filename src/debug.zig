@@ -7,6 +7,7 @@ const OpCode = compiler.OpCode;
 const Value = @import("value.zig").Value;
 const Io = std.Io;
 const mem = std.mem;
+const meta = std.meta;
 const fmt = std.fmt;
 
 pub fn disassembleChunk(
@@ -336,6 +337,75 @@ pub fn parseChunk(
     }
 
     return chunk;
+}
+
+/// We ignore line numbers here, if you care about them you have to test them separately.
+pub fn expectEqualChunks(w: *Io.Writer, expected: Chunk, actual: Chunk, source: []const u8) !void {
+    const testing = std.testing;
+
+    errdefer {
+        disassembleChunk(w, &expected, "expected chunk", source);
+        w.writeByte('\n') catch {};
+        disassembleChunk(w, &actual, "actual chunk", source);
+        w.writeByte('\n') catch {};
+    }
+
+    if (expected.code.items.len != actual.code.items.len) {
+        return error.TestExpectedEqual;
+    }
+
+    var instruction_index: usize = 0;
+    while (instruction_index < expected.code.items.len) {
+        const expected_instruction: OpCode = @enumFromInt(expected.code.items[instruction_index]);
+        const actual_instruction: OpCode = @enumFromInt(actual.code.items[instruction_index]);
+
+        errdefer {
+            w.print("First difference occurs on line {}\n", .{actual.lines.items[instruction_index]}) catch {};
+            w.print("==== expected ====\n", .{}) catch {};
+            _ = disassembleInstruction(w, &expected, instruction_index) catch {};
+            w.print("\n==== actual ====\n", .{}) catch {};
+            _ = disassembleInstruction(w, &actual, instruction_index) catch {};
+            w.writeByte('\n') catch {};
+        }
+
+        if (expected_instruction != actual_instruction) {
+            return error.TestExpectedEqual;
+        }
+
+        const arity = expected_instruction.arity();
+        if (arity > 0) {
+            const start = instruction_index + 1;
+            const end = instruction_index + 1 + arity;
+            const expected_argument = expected.code.items[start..end];
+            const actual_argument = actual.code.items[start..end];
+
+            try testing.expectEqualSlices(u8, expected_argument, actual_argument);
+        }
+
+        instruction_index += arity + 1;
+    }
+
+    if (expected.constants.items.len != actual.constants.items.len) {
+        w.print(
+            "Unequal constants length, expected={}, actual={}",
+            .{ expected.constants.items.len, actual.constants.items.len },
+        ) catch {};
+        return error.TestExpectedEqual;
+    }
+
+    for (0..expected.constants.items.len) |constant_index| {
+        const expected_constant = expected.constants.items[constant_index];
+        const actual_constant = actual.constants.items[constant_index];
+
+        errdefer {
+            w.print(
+                "Unequal constants\n=== expected ===\n{t}: {f}\n\n=== actual ===\n{t}: {f}\n",
+                .{ expected_constant, expected_constant, actual_constant, actual_constant },
+            ) catch {};
+        }
+
+        try testing.expectEqual(expected_constant, actual_constant);
+    }
 }
 
 const ers = @import("errors.zig");
