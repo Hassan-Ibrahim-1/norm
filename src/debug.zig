@@ -4,6 +4,7 @@ const compiler = @import("compiler.zig");
 const Ast = @import("Ast.zig");
 const Chunk = compiler.Chunk;
 const OpCode = compiler.OpCode;
+const Value = @import("value.zig").Value;
 const Io = std.Io;
 const mem = std.mem;
 const fmt = std.fmt;
@@ -283,6 +284,58 @@ pub fn opCodeToBytes(ops: anytype) [ops.len]u8 {
         );
     }
     return bytes;
+}
+
+pub fn parseChunk(
+    gpa: Allocator,
+    bytes: []const u8,
+    constants: []const Value,
+    lines: []const u32,
+) Chunk {
+    var chunk = Chunk.init(gpa);
+    errdefer chunk.deinit();
+
+    var byte_index: usize = 0;
+    while (byte_index < bytes.len) {
+        const instruction: OpCode = @enumFromInt(bytes[byte_index]);
+        const line = if (lines.len > byte_index) lines[byte_index] else 0;
+        chunk.writeOp(instruction, line);
+
+        switch (instruction) {
+            .op_load,
+            .op_store,
+            .op_jump,
+            .op_jump_if_false,
+            .op_loop,
+            .op_pop_n,
+            => {
+                const offset = mem.readInt(u16, bytes[byte_index + 1 .. byte_index + 3][0..2], .little);
+                chunk.writeShort(offset, line);
+            },
+
+            else => {},
+        }
+
+        byte_index += instruction.arity() + 1;
+    }
+
+    chunk.constants.ensureTotalCapacityPrecise(gpa, constants.len) catch oom();
+    for (constants) |constant| {
+        if (constant == .string) {
+            const s = constant.string.data;
+            const string = if (chunk.strings.getKey(s)) |existing| existing else string: {
+                const arena = chunk.string_arena.allocator();
+                const duped = arena.dupe(u8, s) catch oom();
+                chunk.strings.put(arena, duped, {}) catch oom();
+                break :string duped;
+            };
+            chunk.constants.appendAssumeCapacity(.{ .string = .ref(string) });
+        } else {
+            chunk.constants.appendAssumeCapacity(constant);
+        }
+    }
+
+    return chunk;
 }
 
 const ers = @import("errors.zig");

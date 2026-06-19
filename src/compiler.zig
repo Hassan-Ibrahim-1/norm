@@ -149,6 +149,17 @@ pub const OpCode = enum(u8) {
     pub fn byte(op: OpCode) u8 {
         return @intFromEnum(op);
     }
+
+    /// How many bytes `op` takes as arguments.
+    pub fn arity(op: OpCode) u8 {
+        return switch (op) {
+            .op_load, .op_store => 2,
+            .op_pop_n => 2,
+            .op_jump, .op_jump_if_false, .op_loop => 2,
+
+            else => 0,
+        };
+    }
 };
 
 fn oom() noreturn {
@@ -2344,6 +2355,17 @@ test "break statements" {
         errdefer {
             var stderr = Io.File.stderr().writer(testing.io, &.{});
             debug.disassembleChunk(&stderr.interface, &chunk, "output chunk", t.source);
+
+            stderr.interface.writeByte('\n') catch {};
+
+            var expected_chunk = debug.parseChunk(
+                std.testing.allocator,
+                t.expected_code,
+                t.expected_constants,
+                &.{},
+            );
+            debug.disassembleChunk(&stderr.interface, &expected_chunk, "expected chunk", t.source);
+            expected_chunk.deinit();
         }
 
         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
