@@ -193,8 +193,6 @@ fn jumpInstruction(
 ) Io.Writer.Error!usize {
     const jump_offset = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
     std.debug.print("\n", .{});
-    dbg("jump_offset", jump_offset);
-    dbg("offset", offset);
     const instruction_index = offset + jump_offset + 3;
     const jump_instruction: OpCode = @enumFromInt(chunk.code.items[instruction_index]);
     const line = chunk.lines.items[instruction_index];
