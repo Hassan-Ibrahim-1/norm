@@ -19,11 +19,11 @@ const Token = @import("Lexer.zig").Token;
 const Value = @import("value.zig").Value;
 
 pub const OpCode = enum(u8) {
-    // Next byte is constant index.
+    // op_constant: <constant_index: u8>
     //
     // VM: Pop a constant off the stack.
     op_constant,
-    // Next three little endian bytes represent constant index
+    // op_constant_long: <constant_index: u24>
     //
     // VM: Pop a constant off the stack
     op_constant_long,
@@ -153,6 +153,8 @@ pub const OpCode = enum(u8) {
     /// How many bytes `op` takes as arguments.
     pub fn arity(op: OpCode) u8 {
         return switch (op) {
+            .op_constant => 1,
+            .op_constant_long => 3,
             .op_load, .op_store => 2,
             .op_pop_n => 2,
             .op_jump, .op_jump_if_false, .op_loop => 2,
@@ -251,6 +253,7 @@ pub const Compiler = struct {
     current_scope: *Nir.Scope,
 
     // (scope, list of jump indexes to patch)
+    // These will be patched to jump to the point right after scope cleanup
     unpatched_jump_stmts: std.AutoHashMapUnmanaged(*Nir.Scope, std.ArrayList(usize)),
 
     fn init(gpa: Allocator, scratch: Allocator, nir: *Nir, chunk: *Chunk) Compiler {
@@ -399,7 +402,10 @@ pub const Compiler = struct {
             },
 
             .break_stmt => |break_stmt| {
-                const jump_index = c.emitJump(.op_jump, break_stmt.token.line);
+                const line = break_stmt.token.line;
+                c.popScopesUntilTarget(break_stmt.jump_scope, line);
+
+                const jump_index = c.emitJump(.op_jump, line);
                 const gop = c.unpatched_jump_stmts.getOrPut(c.scratch, break_stmt.jump_scope) catch oom();
                 if (!gop.found_existing) {
                     gop.value_ptr.* = .empty;
@@ -407,6 +413,9 @@ pub const Compiler = struct {
                 gop.value_ptr.append(c.scratch, jump_index) catch oom();
             },
             .continue_stmt => |continue_stmt| {
+                const line = continue_stmt.token.line;
+                c.popScopesUntilTarget(continue_stmt.jump_scope, line);
+
                 const jump_index = c.emitJump(.op_jump, continue_stmt.token.line);
                 const gop = c.unpatched_jump_stmts.getOrPut(c.scratch, continue_stmt.jump_scope) catch oom();
                 if (!gop.found_existing) {
@@ -417,7 +426,6 @@ pub const Compiler = struct {
         }
     }
 
-    /// returns the index of the jump opcode
     fn emitLoop(c: *Compiler, loop_index: usize, line: u32) void {
         c.emitOpCode(.op_loop, line);
         // + 2 to account for the short being emitted
@@ -452,7 +460,9 @@ pub const Compiler = struct {
     fn endScope(c: *Compiler, line: u32) void {
         defer c.current_scope = c.current_scope.parent;
         const locals = c.sym_table.locals.get(c.current_scope).?;
-        const local_count = locals.locals.count();
+        const locals_count = locals.locals.count();
+
+        c.emitPop(locals_count, line);
 
         const kv_maybe = c.unpatched_jump_stmts.fetchRemove(c.current_scope);
         if (kv_maybe) |kv| {
@@ -462,15 +472,18 @@ pub const Compiler = struct {
                 c.patchJump(stmt);
             }
         }
+    }
 
-        switch (local_count) {
-            0 => {},
-            1 => c.emitOpCode(.op_pop, line),
-            else => {
-                c.emitOpCode(.op_pop_n, line);
-                c.emitShort(@intCast(local_count), line);
-            },
+    fn popScopesUntilTarget(c: *Compiler, target_scope: *Nir.Scope, line: u32) void {
+        assert(c.current_scope.level != .top);
+
+        var scope = c.current_scope;
+        var locals_count: u32 = c.sym_table.locals.get(target_scope).?.locals.count();
+        while (scope != target_scope) : (scope = scope.parent) {
+            locals_count += c.sym_table.locals.get(scope).?.locals.count();
         }
+
+        c.emitPop(locals_count, line);
     }
 
     fn decl(c: *Compiler, vd: Nir.Stmt.VarDecl) void {
@@ -639,6 +652,17 @@ pub const Compiler = struct {
 
     fn emitShort(c: *Compiler, b: u16, line: u32) void {
         c.compiling_chunk.writeShort(b, line);
+    }
+
+    fn emitPop(c: *Compiler, count: usize, line: u32) void {
+        switch (count) {
+            0 => {},
+            1 => c.emitOpCode(.op_pop, line),
+            else => {
+                c.emitOpCode(.op_pop_n, line);
+                c.emitShort(@intCast(count), line);
+            },
+        }
     }
 
     fn emitBytes(c: *Compiler, a: u8, b: u8) void {
@@ -2266,16 +2290,17 @@ test "break statements" {
                 .op_load, 0, 0,
                 .op_constant, 1,
                 .op_less_int,
-                .op_jump_if_false, 25, 0,
+                .op_jump_if_false, 26, 0,
 
 
                 .op_load, 0, 0,
                 .op_constant, 2,
                 .op_greater_equal_int,
-                .op_jump_if_false, 3, 0,
+                .op_jump_if_false, 4, 0,
 
                 // break
-                .op_jump, 13, 0,
+                .op_pop,
+                .op_jump, 14, 0,
 
                 .op_load, 0, 0,
                 .op_constant, 3,
@@ -2283,7 +2308,7 @@ test "break statements" {
                 .op_store, 0, 0,
                 .op_pop,
 
-                .op_loop, 34, 0,
+                .op_loop, 35, 0,
 
                 .op_pop,
 
@@ -2309,7 +2334,7 @@ test "break statements" {
                 .op_load, 0, 0,
                 .op_constant, 1,
                 .op_less_int,
-                .op_jump_if_false, 36, 0,
+                .op_jump_if_false, 39, 0,
 
                 // x := 2
                 .op_constant, 2,
@@ -2317,15 +2342,18 @@ test "break statements" {
                 .op_load, 0, 0,
                 .op_constant, 3,
                 .op_greater_equal_int,
-                .op_jump_if_false, 3, 0,
+                .op_jump_if_false, 6, 0,
 
                 // break
-                .op_jump, 22, 0,
-                
+                .op_pop_n, 2, 0,
+                .op_jump, 23, 0,
+
                 .op_load, 1, 0,
                 .op_load, 0, 0,
                 .op_add_int,
                 .op_temp_print,
+
+                .op_pop,
 
                 // i += 1
                 .op_load, 0, 0,
@@ -2334,29 +2362,27 @@ test "break statements" {
                 .op_store, 0, 0,
                 .op_pop,
 
-                .op_loop, 45, 0,
+                .op_loop, 48, 0,
 
-                .op_pop,
                 .op_pop,
 
                 .op_return,
             }),
             // zig fmt: on
-            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 2 }, .{ .integer = 3 }, .{ .integer = 3 }, .{ .integer = 1 } },
+            .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 3 }, .{ .integer = 2 }, .{ .integer = 3 }, .{ .integer = 1 } },
         },
     };
 
-    for (tests) |t| {
-        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+    for (tests, 0..) |t, i| {
+        errdefer std.debug.print("failed test case {} with source = \"{s}\"\n", .{ i + 1, t.source });
 
         var chunk = try testCompile(gpa, t.source);
         defer chunk.deinit();
 
         var stderr = Io.File.stderr().writer(testing.io, &.{});
-        stderr.interface.writeByte('\n') catch {};
 
         var expected_chunk = debug.parseChunk(
-            std.testing.allocator,
+            testing.allocator,
             t.expected_code,
             t.expected_constants,
             &.{},
@@ -2364,9 +2390,6 @@ test "break statements" {
         defer expected_chunk.deinit();
 
         try debug.expectEqualChunks(&stderr.interface, expected_chunk, chunk, t.source);
-
-        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
-        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
     }
 }
 
@@ -2418,7 +2441,7 @@ test "continue statements" {
                 .op_add_int,
                 .op_store, 0, 0,
                 .op_pop,
-                
+
                 .op_loop, 25, 0,
 
                 .op_return,
@@ -2458,7 +2481,7 @@ test "continue statements" {
                 .op_add_int,
                 .op_store, 0, 0,
                 .op_pop,
-                
+
                 .op_loop, 34, 0,
 
                 .op_return,
@@ -2509,7 +2532,7 @@ test "continue statements" {
         },
         .{
             .source =
-            \\mut i := 0; 
+            \\mut i := 0;
             \\for i < 5 {
             \\    if i == 3 {
             \\        i += 1;
@@ -2538,7 +2561,7 @@ test "continue statements" {
                 .op_add_int,
                 .op_store, 0, 0,
                 .op_pop,
-                
+
                 // continue
                 .op_jump, 14, 0,
 

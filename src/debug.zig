@@ -10,6 +10,8 @@ const mem = std.mem;
 const meta = std.meta;
 const fmt = std.fmt;
 
+const native_endian = @import("builtin").cpu.arch.endian();
+
 pub fn disassembleChunk(
     w: *Io.Writer,
     chunk: *const Chunk,
@@ -194,7 +196,7 @@ fn jumpInstruction(
     offset: usize,
 ) Io.Writer.Error!usize {
     const jump_offset = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
-    const instruction_index = offset + jump_offset + 3;
+    const instruction_index = offset + jump_offset + 2;
     const jump_instruction: OpCode = @enumFromInt(chunk.code.items[instruction_index]);
     const line = chunk.lines.items[instruction_index];
     try w.print(
@@ -217,7 +219,7 @@ fn loopInstruction(
     offset: usize,
 ) Io.Writer.Error!usize {
     const jump_offset = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
-    const instruction_index = offset - (jump_offset - 3);
+    const instruction_index = offset - (jump_offset - 2);
     const jump_instruction: OpCode = @enumFromInt(chunk.code.items[instruction_index]);
     const line = chunk.lines.items[instruction_index];
     try w.print(
@@ -296,29 +298,13 @@ pub fn parseChunk(
     var chunk = Chunk.init(gpa);
     errdefer chunk.deinit();
 
-    var byte_index: usize = 0;
-    while (byte_index < bytes.len) {
-        const instruction: OpCode = @enumFromInt(bytes[byte_index]);
-        const line = if (lines.len > byte_index) lines[byte_index] else 0;
-        chunk.writeOp(instruction, line);
-
-        switch (instruction) {
-            .op_load,
-            .op_store,
-            .op_jump,
-            .op_jump_if_false,
-            .op_loop,
-            .op_pop_n,
-            => {
-                const offset = mem.readInt(u16, bytes[byte_index + 1 .. byte_index + 3][0..2], .little);
-                chunk.writeShort(offset, line);
-            },
-
-            else => {},
-        }
-
-        byte_index += instruction.arity() + 1;
+    if (lines.len != bytes.len) {
+        chunk.lines.appendNTimes(gpa, 0, bytes.len) catch oom();
+    } else {
+        chunk.lines.appendSlice(gpa, lines) catch oom();
     }
+
+    chunk.code.appendSlice(gpa, bytes) catch oom();
 
     chunk.constants.ensureTotalCapacityPrecise(gpa, constants.len) catch oom();
     for (constants) |constant| {
@@ -351,6 +337,10 @@ pub fn expectEqualChunks(w: *Io.Writer, expected: Chunk, actual: Chunk, source: 
     }
 
     if (expected.code.items.len != actual.code.items.len) {
+        w.print(
+            "Unequal code lengths, expected={}, actual={}\n",
+            .{ expected.code.items.len, actual.code.items.len },
+        ) catch {};
         return error.TestExpectedEqual;
     }
 
