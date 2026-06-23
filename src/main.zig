@@ -71,7 +71,8 @@ fn dumpChunk(io: Io, gpa: Allocator, path: []const u8, stderr: *Io.Writer) !void
     const source = try file_reader.interface.allocRemaining(gpa, .unlimited);
     defer gpa.free(source);
 
-    try stderr.print("{s}\n\n", .{source});
+    try debug.printWithLineNumbers(stderr, source);
+    try stderr.writeByte('\n');
 
     var lexer = Lexer.init(source);
     var tokens = lexer.scanTokens(gpa);
@@ -145,6 +146,8 @@ fn runFile(io: Io, gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr:
 
     var chunk = compiler.compile(gpa, &nir);
     defer chunk.deinit();
+
+    try stderr.print("constants length: {}\n", .{chunk.constants.items.len});
 
     var vm = Vm.init(gpa, stdout, stderr);
     defer vm.deinit();

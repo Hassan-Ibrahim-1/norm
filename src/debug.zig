@@ -196,7 +196,7 @@ fn jumpInstruction(
     offset: usize,
 ) Io.Writer.Error!usize {
     const jump_offset = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
-    const instruction_index = offset + jump_offset + 2;
+    const instruction_index = offset + jump_offset + 3;
     const jump_instruction: OpCode = @enumFromInt(chunk.code.items[instruction_index]);
     const line = chunk.lines.items[instruction_index];
     try w.print(
@@ -219,7 +219,7 @@ fn loopInstruction(
     offset: usize,
 ) Io.Writer.Error!usize {
     const jump_offset = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
-    const instruction_index = offset - (jump_offset - 2);
+    const instruction_index = offset - (jump_offset - 3);
     const jump_instruction: OpCode = @enumFromInt(chunk.code.items[instruction_index]);
     const line = chunk.lines.items[instruction_index];
     try w.print(
@@ -350,6 +350,7 @@ pub fn expectEqualChunks(w: *Io.Writer, expected: Chunk, actual: Chunk, source: 
         const actual_instruction: OpCode = @enumFromInt(actual.code.items[instruction_index]);
 
         errdefer {
+            printWithLineNumbers(w, source) catch {};
             w.print("First difference occurs on line {}\n", .{actual.lines.items[instruction_index]}) catch {};
             w.print("==== expected ====\n", .{}) catch {};
             _ = disassembleInstruction(w, &expected, instruction_index) catch {};
@@ -436,4 +437,12 @@ fn getLine(str: []const u8, line: u32) []const u8 {
         if (i == line - 1) return line_str;
     }
     return "";
+}
+
+pub fn printWithLineNumbers(w: *Io.Writer, str: []const u8) Io.Writer.Error!void {
+    var lines = mem.splitScalar(u8, str, '\n');
+    var line_number: usize = 1;
+    while (lines.next()) |line| : (line_number += 1) {
+        try w.print("{d} {s}\n", .{ line_number, line });
+    }
 }

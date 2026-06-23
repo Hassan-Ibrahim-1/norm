@@ -252,11 +252,15 @@ pub const Compiler = struct {
 
     current_scope: *Nir.Scope,
 
+    locals_in_scope: std.AutoHashMapUnmanaged(*Nir.Scope, u32),
+
     // (scope, list of jump indexes to patch)
     // These will be patched to jump to the point right after scope cleanup
     unpatched_jump_stmts: std.AutoHashMapUnmanaged(*Nir.Scope, std.ArrayList(usize)),
 
     fn init(gpa: Allocator, scratch: Allocator, nir: *Nir, chunk: *Chunk) Compiler {
+        var locals_in_scope: std.AutoHashMapUnmanaged(*Nir.Scope, u32) = .empty;
+        locals_in_scope.put(scratch, nir.sym_table.top_scope, 0) catch oom();
         return .{
             .gpa = gpa,
             .scratch = scratch,
@@ -264,12 +268,14 @@ pub const Compiler = struct {
             .compiling_chunk = chunk,
             .unpatched_jump_stmts = .empty,
             .sym_table = &nir.sym_table,
+            .locals_in_scope = locals_in_scope,
             .stmts = nir.stmts,
         };
     }
 
     fn deinit(c: *Compiler) void {
         c.unpatched_jump_stmts.deinit(c.scratch);
+        c.locals_in_scope.deinit(c.scratch);
         c.* = undefined;
     }
 
@@ -287,7 +293,7 @@ pub const Compiler = struct {
                     c.emitOpCode(.op_pop, expr_stmt.expr.token().line);
                 }
             },
-            .var_decl => |vd| c.expression(vd.value),
+            .var_decl => |vd| c.decl(vd),
             .print => |p| {
                 c.expression(p.expr);
                 c.emitOpCode(.op_temp_print, p.print.line);
@@ -347,6 +353,7 @@ pub const Compiler = struct {
                     c.patchJump(jump);
                 }
             },
+
             .for_stmt => |for_stmt| {
                 c.beginScope(for_stmt.scope);
                 defer c.endScope(for_stmt.block.token.line);
@@ -359,6 +366,7 @@ pub const Compiler = struct {
                     };
                     c.statement(nir_init);
                 }
+
                 const loop_index = c.compiling_chunk.code.items.len;
                 c.expression(for_stmt.condition);
                 const jump_index = c.emitJump(.op_jump_if_false, for_stmt.token.line);
@@ -412,6 +420,7 @@ pub const Compiler = struct {
                 }
                 gop.value_ptr.append(c.scratch, jump_index) catch oom();
             },
+
             .continue_stmt => |continue_stmt| {
                 const line = continue_stmt.token.line;
                 c.popScopesUntilTarget(continue_stmt.jump_scope, line);
@@ -455,6 +464,7 @@ pub const Compiler = struct {
 
     fn beginScope(c: *Compiler, scope: *Nir.Scope) void {
         c.current_scope = scope;
+        c.locals_in_scope.put(c.scratch, c.current_scope, 0) catch oom();
     }
 
     fn endScope(c: *Compiler, line: u32) void {
@@ -472,21 +482,25 @@ pub const Compiler = struct {
                 c.patchJump(stmt);
             }
         }
+
+        const ok = c.locals_in_scope.remove(c.current_scope);
+        assert(ok);
     }
 
     fn popScopesUntilTarget(c: *Compiler, target_scope: *Nir.Scope, line: u32) void {
         assert(c.current_scope.level != .top);
 
         var scope = c.current_scope;
-        var locals_count: u32 = c.sym_table.locals.get(target_scope).?.locals.count();
+        var locals_count: u32 = c.locals_in_scope.get(target_scope).?;
         while (scope != target_scope) : (scope = scope.parent) {
-            locals_count += c.sym_table.locals.get(scope).?.locals.count();
+            locals_count += c.locals_in_scope.get(scope).?;
         }
 
         c.emitPop(locals_count, line);
     }
 
     fn decl(c: *Compiler, vd: Nir.Stmt.VarDecl) void {
+        c.locals_in_scope.getPtr(c.current_scope).?.* += 1;
         c.expression(vd.value);
     }
 
@@ -2298,7 +2312,6 @@ test "break statements" {
                 .op_greater_equal_int,
                 .op_jump_if_false, 4, 0,
 
-                // break
                 .op_pop,
                 .op_jump, 14, 0,
 
@@ -2317,6 +2330,7 @@ test "break statements" {
             // zig fmt: on
             .expected_constants = &.{ .{ .integer = 0 }, .{ .integer = 3 }, .{ .integer = 3 }, .{ .integer = 1 } },
         },
+
         .{
             .source =
             \\for mut i := 0; i < 3; i += 1 {

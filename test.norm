@@ -1,4 +1,32 @@
-if true {
-    print(true);
+// test: "loop control statements: nested scopes"
+// expect:
+// 111
+// 226
+// 341
+// 457
+// 453
+// 5453
+
+{
+    mut total := 0;
+    for mut i := 0; i < 5; i += 1 {
+        outer := i + 1;
+        {
+            middle := outer + 10;
+            {
+                inner := middle + 100;
+                if i == 1 {
+                    skipped := inner + 1000;
+                    continue;
+                }
+                total += inner;
+            }
+        }
+        after_inner := total + i;
+        print(after_inner);
+    }
+
+    reuse := total + 5000;
+    print(total);
+    print(reuse);
 }
-print(false);

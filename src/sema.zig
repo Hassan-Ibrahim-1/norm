@@ -280,6 +280,11 @@ const Sema = struct {
                 defer s.endScope();
 
                 const condition = s.expression(condition_for.condition);
+                if (condition.type != .n_bool) {
+                    s.reportError(condition, "Expected condition to be bool got {f}", .{condition.type});
+                    return .invalid;
+                }
+
                 const nir_block = s.statement(.{ .block = condition_for.block }).block;
                 return .{
                     .condition_for = .{
@@ -311,7 +316,12 @@ const Sema = struct {
                         else => unreachable,
                     };
                 } else null;
+
                 const condition = s.expression(for_stmt.condition);
+                if (condition.type != .n_bool) {
+                    s.reportError(condition, "Expected condition to be bool got {f}", .{condition.type});
+                    return .invalid;
+                }
 
                 const increment: ?Nir.Stmt.For.IncrementStmt = if (for_stmt.increment) |i| s: {
                     const ast_stmt: Ast.Stmt = switch (i) {

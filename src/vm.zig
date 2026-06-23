@@ -1975,3 +1975,344 @@ test "for loops" {
         try testing.expectEqualStrings(expected_str, result);
     }
 }
+
+test "loop control statements: general" {
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const Value,
+    } = &.{
+        .{
+            .source =
+            \\{
+            \\    mut total := 0;
+            \\    for mut i := 0; i < 6; i += 1 {
+            \\        loop_value := i + 10;
+            \\        if i == 1 {
+            \\            skipped := loop_value * 100;
+            \\            continue;
+            \\        }
+            \\        if i == 4 {
+            \\            stop := loop_value * 100;
+            \\            break;
+            \\        }
+            \\        total += loop_value;
+            \\    }
+            \\    reuse := total + 1000;
+            \\    print(total);
+            \\    print(reuse);
+            \\}
+            ,
+            .expected = &.{ .{ .integer = 35 }, .{ .integer = 1035 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    mut total := 0;
+            \\    for mut i := 0; i < 5; {
+            \\        loop_value := i + 20;
+            \\        if i == 2 {
+            \\            skipped := loop_value;
+            \\            i += 1;
+            \\            continue;
+            \\        }
+            \\        if i == 4 {
+            \\            stop := loop_value;
+            \\            break;
+            \\        }
+            \\        total += loop_value;
+            \\        i += 1;
+            \\    }
+            \\    reuse := total + 2000;
+            \\    print(total);
+            \\    print(reuse);
+            \\}
+            ,
+            .expected = &.{ .{ .integer = 64 }, .{ .integer = 2064 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    mut total := 0;
+            \\    mut i := 0;
+            \\    for ; i < 5; i += 1 {
+            \\        loop_value := i + 50;
+            \\        if i == 2 {
+            \\            skipped := loop_value;
+            \\            continue;
+            \\        }
+            \\        if i == 4 {
+            \\            stop := loop_value;
+            \\            break;
+            \\        }
+            \\        total += loop_value;
+            \\    }
+            \\    reuse := total + i;
+            \\    print(total);
+            \\    print(reuse);
+            \\}
+            ,
+            .expected = &.{ .{ .integer = 154 }, .{ .integer = 158 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    mut total := 0;
+            \\    mut i := 0;
+            \\    for i < 6 {
+            \\        loop_value := i + 30;
+            \\        if i == 1 {
+            \\            skipped := loop_value;
+            \\            i += 1;
+            \\            continue;
+            \\        }
+            \\        if i == 4 {
+            \\            stop := loop_value;
+            \\            break;
+            \\        }
+            \\        total += loop_value;
+            \\        i += 1;
+            \\    }
+            \\    reuse := total + i;
+            \\    print(total);
+            \\    print(reuse);
+            \\}
+            ,
+            .expected = &.{ .{ .integer = 95 }, .{ .integer = 99 } },
+        },
+        .{
+            .source =
+            \\{
+            \\    mut total := 0;
+            \\    mut i := 0;
+            \\    for {
+            \\        loop_value := i + 40;
+            \\        if i == 1 {
+            \\            skipped := loop_value;
+            \\            i += 1;
+            \\            continue;
+            \\        }
+            \\        if i == 5 {
+            \\            stop := loop_value;
+            \\            break;
+            \\        }
+            \\        total += loop_value;
+            \\        i += 1;
+            \\    }
+            \\    reuse := total + i;
+            \\    print(total);
+            \\    print(reuse);
+            \\}
+            ,
+            .expected = &.{ .{ .integer = 169 }, .{ .integer = 174 } },
+        },
+    };
+
+    const gpa = testing.allocator;
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const result = try testRunPrint(gpa, t.source);
+        defer gpa.free(result);
+
+        var temp_writer: Io.Writer.Allocating = .init(gpa);
+        defer temp_writer.deinit();
+
+        for (t.expected) |value| {
+            try temp_writer.writer.print("{f}\n", .{value});
+        }
+        const expected_str = temp_writer.written();
+
+        try testing.expectEqualStrings(expected_str, result);
+    }
+}
+
+test "loop control statements: nested scopes" {
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const Value,
+    } = &.{
+        .{
+            .source =
+            \\{
+            \\    mut total := 0;
+            \\    for mut i := 0; i < 5; i += 1 {
+            \\        outer := i + 1;
+            \\        {
+            \\            middle := outer + 10;
+            \\            {
+            \\                inner := middle + 100;
+            \\                if i == 1 {
+            \\                    skipped := inner + 1000;
+            \\                    continue;
+            \\                }
+            \\                total += inner;
+            \\            }
+            \\        }
+            \\        after_inner := total + i;
+            \\        print(after_inner);
+            \\    }
+            \\    reuse := total + 5000;
+            \\    print(total);
+            \\    print(reuse);
+            \\}
+            ,
+            .expected = &.{
+                .{ .integer = 111 },
+                .{ .integer = 226 },
+                .{ .integer = 341 },
+                .{ .integer = 457 },
+                .{ .integer = 453 },
+                .{ .integer = 5453 },
+            },
+        },
+        .{
+            .source =
+            \\{
+            \\    mut total := 0;
+            \\    for mut i := 0; i < 6; i += 1 {
+            \\        outer := i + 2;
+            \\        {
+            \\            middle := outer * 10;
+            \\            {
+            \\                inner := middle + 1;
+            \\                if i == 3 {
+            \\                    stop := inner + 100;
+            \\                    break;
+            \\                }
+            \\                total += inner;
+            \\            }
+            \\        }
+            \\        after_inner := total + i;
+            \\        print(after_inner);
+            \\    }
+            \\    reuse := total + 6000;
+            \\    print(total);
+            \\    print(reuse);
+            \\}
+            ,
+            .expected = &.{
+                .{ .integer = 21 },
+                .{ .integer = 53 },
+                .{ .integer = 95 },
+                .{ .integer = 93 },
+                .{ .integer = 6093 },
+            },
+        },
+    };
+
+    const gpa = testing.allocator;
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const result = try testRunPrint(gpa, t.source);
+        defer gpa.free(result);
+
+        var temp_writer: Io.Writer.Allocating = .init(gpa);
+        defer temp_writer.deinit();
+
+        for (t.expected) |value| {
+            try temp_writer.writer.print("{f}\n", .{value});
+        }
+        const expected_str = temp_writer.written();
+
+        try testing.expectEqualStrings(expected_str, result);
+    }
+}
+
+test "loop control statements: nested for loops" {
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const Value,
+    } = &.{
+        .{
+            .source =
+            \\{
+            \\    mut total := 0;
+            \\    for mut i := 0; i < 3; i += 1 {
+            \\        outer_local := i * 100;
+            \\        for mut j := 0; j < 5; j += 1 {
+            \\            inner_local := outer_local + j;
+            \\            if j == 1 {
+            \\                skipped := inner_local + 1000;
+            \\                continue;
+            \\            }
+            \\            if j == 3 {
+            \\                stopped := inner_local + 2000;
+            \\                break;
+            \\            }
+            \\            total += inner_local;
+            \\        }
+            \\        after_inner := total + i;
+            \\        print(after_inner);
+            \\    }
+            \\    reuse := total + 7000;
+            \\    print(total);
+            \\    print(reuse);
+            \\}
+            ,
+            .expected = &.{
+                .{ .integer = 2 },
+                .{ .integer = 205 },
+                .{ .integer = 608 },
+                .{ .integer = 606 },
+                .{ .integer = 7606 },
+            },
+        },
+        .{
+            .source =
+            \\{
+            \\    mut total := 0;
+            \\    for mut i := 0; i < 5; i += 1 {
+            \\        outer_local := i + 1;
+            \\        if i == 1 {
+            \\            skipped_outer := outer_local;
+            \\            continue;
+            \\        }
+            \\        for mut j := 0; j < 3; j += 1 {
+            \\            inner_local := outer_local * 10 + j;
+            \\            if i == 3 {
+            \\                stopped_inner := inner_local;
+            \\                break;
+            \\            }
+            \\            total += inner_local;
+            \\        }
+            \\        if i == 4 {
+            \\            stopped_outer := total;
+            \\            break;
+            \\        }
+            \\        after_inner := total + i;
+            \\        print(after_inner);
+            \\    }
+            \\    reuse := total + 8000;
+            \\    print(total);
+            \\    print(reuse);
+            \\}
+            ,
+            .expected = &.{
+                .{ .integer = 33 },
+                .{ .integer = 128 },
+                .{ .integer = 129 },
+                .{ .integer = 279 },
+                .{ .integer = 8279 },
+            },
+        },
+    };
+
+    const gpa = testing.allocator;
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test with source=\"{s}\"\n", .{t.source});
+        const result = try testRunPrint(gpa, t.source);
+        defer gpa.free(result);
+
+        var temp_writer: Io.Writer.Allocating = .init(gpa);
+        defer temp_writer.deinit();
+
+        for (t.expected) |value| {
+            try temp_writer.writer.print("{f}\n", .{value});
+        }
+        const expected_str = temp_writer.written();
+
+        try testing.expectEqualStrings(expected_str, result);
+    }
+}
