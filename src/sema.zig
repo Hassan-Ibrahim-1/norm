@@ -41,16 +41,18 @@ const Sema = struct {
         break :init m;
     };
 
+    // TODO: refactor this away
     fn canCast(ty: NormType, target: NormType) bool {
         return (cast_map[ty.int()] & mask(target)) != 0;
     }
 
+    // TODO: refactor this away
     fn commonType(l: NormType, r: NormType) NormType {
         if (l == r) return l;
         if (l.isNumeric() or r.isNumeric()) {
             return .n_float;
         }
-        @panic("hmm");
+        return .n_invalid;
     }
 
     fn init(gpa: Allocator, arena: Allocator) Sema {
@@ -404,6 +406,7 @@ const Sema = struct {
     }
 
     fn tryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
+        if (target == .n_invalid) return null;
         if (expr.type == target) return expr;
         const arena = s.arena;
         if (canCast(expr.type, target)) {
@@ -921,6 +924,8 @@ test "arithmetic failure" {
         .{ .source = "1.0 + true", .error_msg = "float + bool is not a valid operation" },
         .{ .source = "true + 1.0", .error_msg = "bool + float is not a valid operation" },
         .{ .source = "false + 2", .error_msg = "bool + int is not a valid operation" },
+        .{ .source = "1 + \"str\"", .error_msg = "int + string is not a valid operation" },
+        .{ .source = "\"str\" + 1", .error_msg = "string + int is not a valid operation" },
     };
 
     for (tests) |t| {
@@ -1013,6 +1018,10 @@ test "comparison failure" {
         .{ .source = "\"Hey\" == 2", .error_msg = "Cannot compare string and int." },
         .{ .source = "2 == \"Hey\"", .error_msg = "Cannot compare int and string." },
         .{ .source = "\"Hey\" != 2", .error_msg = "Cannot compare string and int." },
+        .{ .source = "\"Hey\" != false", .error_msg = "Cannot compare string and bool." },
+        .{ .source = "\"Hey\" == false", .error_msg = "Cannot compare string and bool." },
+        .{ .source = "false == \"Hey\"", .error_msg = "Cannot compare bool and string." },
+        .{ .source = "true != \"Hey\"", .error_msg = "Cannot compare bool and string." },
         .{ .source = "2 != \"Hey\"", .error_msg = "Cannot compare int and string." },
     };
 

@@ -147,8 +147,6 @@ fn runFile(io: Io, gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr:
     var chunk = compiler.compile(gpa, &nir);
     defer chunk.deinit();
 
-    try stderr.print("constants length: {}\n", .{chunk.constants.items.len});
-
     var vm = Vm.init(gpa, stdout, stderr);
     defer vm.deinit();
 
