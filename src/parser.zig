@@ -173,8 +173,14 @@ const Parser = struct {
             p.consumeSemicolon();
             return print_stmt;
         } else if (p.match(.kw_for)) {
+            if (p.parsing_loop) {
+                return p.forStmt();
+            }
+
             p.parsing_loop = true;
-            return p.forStmt();
+            const stmt = p.forStmt();
+            defer p.parsing_loop = false;
+            return stmt;
         } else if (p.matchEither(.kw_break, .kw_continue)) {
             if (!p.parsing_loop) {
                 p.jumpStmtOutsideLoop(p.previous);
@@ -757,6 +763,30 @@ fn testParseStmts(gpa: Allocator, source: []const u8) ![]const u8 {
     }
 
     return debug.printStmts(gpa, ast.stmts);
+}
+
+fn testParseError(gpa: Allocator, source: []const u8) ![][]u8 {
+    var l = Lexer.init(source);
+    var tokens = l.scanTokens(gpa);
+    defer tokens.deinit(gpa);
+    if (tokens.errors.len > 0) {
+        dbg("tokens.errors", tokens.errors);
+        return error.LexerError;
+    }
+
+    var ast = parse(gpa, tokens.tokens);
+    defer ast.arena.deinit();
+    if (ast.errors.len == 0) {
+        const stmts = debug.printStmts(gpa, ast.stmts);
+        dbg("stmts", stmts);
+        return error.ExpectedParserError;
+    }
+
+    var errors: [][]u8 = try gpa.alloc([]u8, ast.errors.len);
+    for (0..ast.errors.len) |i| {
+        errors[i] = try gpa.dupe(u8, ast.errors[i].error_msg);
+    }
+    return errors;
 }
 
 test "arithmetic expressions" {
@@ -1624,7 +1654,7 @@ test "for loops" {
     }
 }
 
-test "loop jump stmts" {
+test "loop control stmts" {
     const gpa = testing.allocator;
     const tests: []const struct {
         source: []const u8,
@@ -1712,5 +1742,59 @@ test "loop jump stmts" {
         const actual = try testParseStmts(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "loop control statements: errors" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{
+            .source = "break;",
+            .error_msg = "Found break statement outside a loop",
+        },
+        .{
+            .source =
+            \\{
+            \\    for mut i := 0; i < 1; i += 1 {
+            \\        print(i);
+            \\    }
+            \\
+            \\    break;
+            \\}
+            ,
+            .error_msg = "Found break statement outside a loop",
+        },
+        .{
+            .source =
+            \\{
+            \\    for mut i := 0; i < 1; i += 1 {
+            \\        print(i);
+            \\        break;
+            \\    }
+            \\    for { break; }
+            \\    continue;
+            \\}
+            ,
+            .error_msg = "Found continue statement outside a loop",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+
+        const errors = try testParseError(arena.allocator(), t.source);
+        if (errors.len != 1) {
+            std.debug.print("Expected 1 error, got {} instead.", .{errors.len});
+            dbg("errors", errors);
+        }
+
+        try testing.expectEqualStrings(t.error_msg, errors[0]);
     }
 }
