@@ -1,0 +1,11 @@
+// test: "parser loop state: continue after a completed loop is invalid"
+// expect error:
+// Found continue statement outside a loop
+
+{
+    for mut i := 0; i < 1; i += 1 {
+        print(i);
+    }
+
+    continue;
+}

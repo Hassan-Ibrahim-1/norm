@@ -1,0 +1,35 @@
+// test: "loop control statements: continue still runs for increment"
+// expect:
+// 10
+// 26
+// 46
+// 42
+// 16
+
+{
+    mut total := 0;
+    mut hits := 0;
+
+    for mut i := 0; i < 5; i += 1 {
+        before := i + 10;
+        if i == 1 {
+            skipped := before * 10;
+            continue;
+        }
+
+        {
+            local := before + i;
+            if i == 3 {
+                hits += local;
+                continue;
+            }
+            total += local;
+        }
+
+        after := total + i;
+        print(after);
+    }
+
+    print(total);
+    print(hits);
+}

@@ -1,0 +1,23 @@
+// test: "scopes: for initializer and body locals can be reused after loop"
+// expect:
+// 116
+// 16
+// 6
+
+{
+    mut total := 0;
+
+    for mut i := 0; i < 3; i += 1 {
+        loop_local := i + 1;
+        total += loop_local;
+    }
+
+    i := total + 10;
+    {
+        loop_local := i + 100;
+        print(loop_local);
+    }
+
+    print(i);
+    print(total);
+}

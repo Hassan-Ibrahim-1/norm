@@ -1,0 +1,9 @@
+// test: "globals: typed forward initializer should not read an uninitialized later global"
+// expect error:
+// Variable z used before it's definition
+
+y: int = z + 1;
+z: int = 5;
+
+print(y);
+print(z);
