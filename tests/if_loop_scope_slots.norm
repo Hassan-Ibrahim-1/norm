@@ -1,0 +1,32 @@
+// test: "scopes: false if branches containing loops do not disturb later slots"
+// expect:
+// 7
+// 17
+
+{
+    mut total := 0;
+
+    if false {
+        phantom := 1000;
+        for {
+            total += phantom;
+            break;
+        }
+    } else if false {
+        other := 2000;
+        total += other;
+    } else {
+        for mut i := 0; i < 4; i += 1 {
+            branch_local := i + 1;
+            if i == 2 {
+                skipped := branch_local + 100;
+                continue;
+            }
+            total += branch_local;
+        }
+    }
+
+    after := total + 10;
+    print(total);
+    print(after);
+}

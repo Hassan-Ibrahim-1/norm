@@ -1,0 +1,43 @@
+// test: "loop control statements: outer continue after an inner loop"
+// expect:
+// 2
+// 25
+// 68
+// 131
+// 128
+// 201
+
+{
+    mut total := 0;
+    mut events := 0;
+
+    for mut i := 0; i < 4; i += 1 {
+        row := i * 10;
+
+        for mut j := 0; j < 4; j += 1 {
+            cell := row + j;
+            if j == 1 {
+                skipped := cell + 1000;
+                continue;
+            }
+            if j == 3 {
+                stopped := cell + 2000;
+                break;
+            }
+            total += cell;
+        }
+
+        after_inner := total + i;
+        print(after_inner);
+
+        if i == 1 {
+            outer_skip := after_inner + 3000;
+            continue;
+        }
+
+        events += after_inner;
+    }
+
+    print(total);
+    print(events);
+}

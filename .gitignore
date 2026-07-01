@@ -2,3 +2,4 @@
 .idea
 zig-out
 .zig-cache
+__pycache__

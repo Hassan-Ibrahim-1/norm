@@ -1,0 +1,39 @@
+// test: "loop control statements: infinite loop nested break and continue cleanup"
+// expect:
+// 100
+// 206
+// 313
+// 310
+// 108
+// 4
+
+{
+    mut i := 0;
+    mut total := 0;
+    mut marker := 0;
+
+    for {
+        before := i + 100;
+        {
+            inner := before + i;
+            if i == 1 {
+                skipped := inner + 1000;
+                i += 1;
+                continue;
+            }
+            if i == 4 {
+                marker = inner;
+                break;
+            }
+            total += inner;
+        }
+
+        after := total + i;
+        print(after);
+        i += 1;
+    }
+
+    print(total);
+    print(marker);
+    print(i);
+}

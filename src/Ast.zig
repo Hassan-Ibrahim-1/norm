@@ -201,7 +201,7 @@ pub const Stmt = union(enum) {
     };
 
     pub const Print = struct {
-        print: Token,
+        token: Token,
         expr: *Expr,
 
         pub fn format(p: *const Stmt.Print, w: *Io.Writer) Io.Writer.Error!void {
@@ -221,6 +221,22 @@ pub const Stmt = union(enum) {
     continue_stmt: Continue,
     return_stmt: Return,
     print: Print,
+
+    pub fn token(s: *const Stmt) Token {
+        return switch (s.*) {
+            .expression => |e| e.expr.token(),
+            .var_decl => |vd| vd.ident,
+            .var_assign => |va| va.ident,
+            .block => |b| b.token,
+            .if_stmt => |i| i.token,
+            .for_stmt => |f| f.token,
+            .condition_for => |f| f.token,
+            .infinite_for => |f| f.token,
+            .break_stmt => |b| b.token,
+            .continue_stmt => |c| c.token,
+            .print => |p| p.token,
+        };
+    }
 
     pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {
         switch (stmt) {

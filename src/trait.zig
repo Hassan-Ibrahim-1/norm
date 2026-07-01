@@ -37,7 +37,7 @@ pub inline fn isEnum(T: type, t: anytype) bool {
     return false;
 }
 
-pub fn eqlTag(a: anytype, b: @TypeOf(a)) bool {
+pub fn tagEql(a: anytype, b: @TypeOf(a)) bool {
     return meta.activeTag(a) == meta.activeTag(b);
 }
 

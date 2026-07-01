@@ -7,7 +7,7 @@ const Ast = @import("Ast.zig");
 const debug = @import("debug.zig");
 const ers = @import("errors.zig");
 const Token = @import("Lexer.zig").Token;
-const eqlTag = @import("trait.zig").eqlTag;
+const tagEql = @import("trait.zig").tagEql;
 
 const Nir = @import("Nir.zig");
 const NormType = Nir.NormType;
@@ -46,16 +46,18 @@ const Sema = struct {
         break :init m;
     };
 
+    // TODO: refactor this away
     fn canCast(ty: NormType, target: NormType) bool {
         return (cast_map[@intFromEnum(std.meta.activeTag(ty))] & mask(target)) != 0;
     }
 
+    // TODO: refactor this away
     fn commonType(l: NormType, r: NormType) NormType {
-        if (eqlTag(l, r)) return l;
+        if (tagEql(l, r)) return l;
         if (l.isNumeric() or r.isNumeric()) {
             return .n_float;
         }
-        @panic("hmm");
+        return .n_invalid;
     }
 
     fn init(gpa: Allocator, arena: Allocator) Sema {
@@ -147,18 +149,25 @@ const Sema = struct {
                         const var_type = s.analyzeTypeExpr(type_expr);
                         _ = var_type; // autofix
                     }
-                    const already_exists = s.sym_table.register(vd.ident.lexeme, var_type, vd.mutable);
-                    if (already_exists) {
-                        s.redefinedVariableErr(vd.ident);
-                    }
+                    // const already_exists = s.sym_table.register(vd.ident.lexeme, var_type, vd.mutable);
+                    // if (already_exists) {
+                    //     s.redefinedVariableErr(vd.ident);
+                    // }
                 },
-                else => {},
+                .block => {
+                    // TODO: disallow these as well
+                },
+                else => {
+                    if (@import("builtin").is_test) continue;
+                    s.disallowedGlobalStatementErr(stmt);
+                },
             }
         }
     }
 
     fn analyze(s: *Sema, stmts: []Ast.Stmt) []Nir.Stmt {
         s.analyzeGlobalSymbols(stmts);
+        if (s.errors.items.len > 0) return &.{};
 
         var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
 
@@ -219,7 +228,7 @@ const Sema = struct {
             },
             .print => |p| {
                 const nir_expr = s.expression(p.expr);
-                return .{ .print = .{ .print = p.print, .expr = nir_expr } };
+                return .{ .print = .{ .token = p.token, .expr = nir_expr } };
             },
             .block => |block| {
                 const previous_for_block_scope = s.current_for_block_scope;
@@ -337,6 +346,11 @@ const Sema = struct {
                 defer s.endScope();
 
                 const condition = s.expression(condition_for.condition);
+                if (condition.type != .n_bool) {
+                    s.reportError(condition, "Expected condition to be bool got {f}", .{condition.type});
+                    return .invalid;
+                }
+
                 const nir_block = s.statement(.{ .block = condition_for.block }).block;
                 return .{
                     .condition_for = .{
@@ -368,7 +382,12 @@ const Sema = struct {
                         else => unreachable,
                     };
                 } else null;
+
                 const condition = s.expression(for_stmt.condition);
+                if (condition.type != .n_bool) {
+                    s.reportError(condition, "Expected condition to be bool got {f}", .{condition.type});
+                    return .invalid;
+                }
 
                 const increment: ?Nir.Stmt.For.IncrementStmt = if (for_stmt.increment) |i| s: {
                     const ast_stmt: Ast.Stmt = switch (i) {
@@ -423,7 +442,7 @@ const Sema = struct {
             .return_stmt => |return_stmt| {
                 const nir_expr = if (return_stmt.expr) |expr| s.expression(expr) else null;
                 const return_type = if (nir_expr) |expr| expr.type else .n_void;
-                if (!eqlTag(return_type, s.function_type)) {
+                if (!tagEql(return_type, s.function_type)) {
                     s.wrongReturnType(return_type, s.function_type, return_stmt.token);
                     return .invalid;
                 }
@@ -480,7 +499,9 @@ const Sema = struct {
     }
 
     fn tryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
-        if (eqlTag(expr.type, target)) return expr;
+        if (target == .n_invalid) return null;
+        if (tagEql(expr.type, target)) return expr;
+
         const arena = s.arena;
         if (canCast(expr.type, target)) {
             return makeAnonCast(arena, expr, target);
@@ -489,7 +510,7 @@ const Sema = struct {
     }
 
     fn expectTypeTryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
-        if (eqlTag(expr.type, target) or target == .n_invalid) return expr;
+        if (tagEql(expr.type, target) or target == .n_invalid) return expr;
         const casted = s.tryCast(expr, target) orelse {
             s.reportError(expr, "Expected {f} got {f}", .{ target, expr.type });
             return null;
@@ -679,6 +700,11 @@ const Sema = struct {
         );
     }
 
+    fn disallowedGlobalStatementErr(s: *Sema, stmt: Ast.Stmt) void {
+        const line = stmt.token().line;
+        s.reportErrorLine(line, "A '{t}' statement is not allowed in global scope", .{stmt});
+    }
+
     fn literal(s: *Sema, l: *Ast.Expr.Literal) *Nir.Expr {
         const ty: NormType = switch (l.value) {
             .float => .n_float,
@@ -764,7 +790,7 @@ const Sema = struct {
         const args = s.arena.alloc(*Nir.Expr, c.args.len) catch oom();
         for (c.args, 0..) |arg, i| {
             args[i] = s.expression(arg);
-            if (!eqlTag(args[i].type, callee_fn.parameters[i].type)) {
+            if (!tagEql(args[i].type, callee_fn.parameters[i].type)) {
                 return s.badArgumentType(i + 1, args[i].type, callee_fn.parameters[i].type, c.token);
             }
         }
@@ -798,7 +824,7 @@ const Sema = struct {
         comptime error_msg: []const u8,
         args: anytype,
     ) bool {
-        if (eqlTag(expr.type, ty)) return true;
+        if (tagEql(expr.type, ty)) return true;
         s.reportError(expr, error_msg, args);
         return false;
     }
@@ -1149,6 +1175,8 @@ test "arithmetic failure" {
         .{ .source = "1.0 + true", .error_msg = "float + bool is not a valid operation" },
         .{ .source = "true + 1.0", .error_msg = "bool + float is not a valid operation" },
         .{ .source = "false + 2", .error_msg = "bool + int is not a valid operation" },
+        .{ .source = "1 + \"str\"", .error_msg = "int + string is not a valid operation" },
+        .{ .source = "\"str\" + 1", .error_msg = "string + int is not a valid operation" },
     };
 
     for (tests) |t| {
@@ -1241,6 +1269,10 @@ test "comparison failure" {
         .{ .source = "\"Hey\" == 2", .error_msg = "Cannot compare string and int." },
         .{ .source = "2 == \"Hey\"", .error_msg = "Cannot compare int and string." },
         .{ .source = "\"Hey\" != 2", .error_msg = "Cannot compare string and int." },
+        .{ .source = "\"Hey\" != false", .error_msg = "Cannot compare string and bool." },
+        .{ .source = "\"Hey\" == false", .error_msg = "Cannot compare string and bool." },
+        .{ .source = "false == \"Hey\"", .error_msg = "Cannot compare bool and string." },
+        .{ .source = "true != \"Hey\"", .error_msg = "Cannot compare bool and string." },
         .{ .source = "2 != \"Hey\"", .error_msg = "Cannot compare int and string." },
     };
 
@@ -2223,7 +2255,7 @@ test "variable assignment" {
             .source =
             \\mut x := 10;
             \\{
-            \\    x = 3;   
+            \\    x = 3;
             \\}
             ,
             .expected =
@@ -2236,7 +2268,7 @@ test "variable assignment" {
         .{
             .source =
             \\{
-            \\    x = 3;   
+            \\    x = 3;
             \\}
             \\mut x := 10;
             ,

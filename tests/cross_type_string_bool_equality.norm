@@ -1,0 +1,8 @@
+// test: "type errors: string and bool equality should report a diagnostic"
+// expect error:
+// Cannot compare string and bool.
+
+{
+    result := "ready" == true;
+    print(result);
+}

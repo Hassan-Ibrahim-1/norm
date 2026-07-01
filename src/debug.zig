@@ -4,9 +4,13 @@ const compiler = @import("compiler.zig");
 const Ast = @import("Ast.zig");
 const Chunk = compiler.Chunk;
 const OpCode = compiler.OpCode;
+const Value = @import("value.zig").Value;
 const Io = std.Io;
 const mem = std.mem;
+const meta = std.meta;
 const fmt = std.fmt;
+
+const native_endian = @import("builtin").cpu.arch.endian();
 
 pub fn disassembleChunk(
     w: *Io.Writer,
@@ -110,12 +114,16 @@ pub fn disassembleInstruction(
 
         .op_store,
         .op_load,
-        .op_jump,
-        .op_jump_if_false,
-        .op_loop,
         => shortInstruction(w, instruction, chunk, offset),
 
-        .op_pop_n => popNInstruction(w, instruction, chunk, offset),
+        .op_jump,
+        .op_jump_if_false,
+        => jumpInstruction(w, instruction, chunk, offset),
+
+        .op_loop,
+        => loopInstruction(w, instruction, chunk, offset),
+
+        .op_pop_n => popNInstructions(w, instruction, chunk, offset),
     };
 }
 
@@ -136,9 +144,9 @@ fn constantInstruction(
 ) Io.Writer.Error!usize {
     const constant = chunk.code.items[offset + 1];
     try w.print(
-        "{s:<16} {d:>4} '{f}'\n",
+        "{t:<16} {d:>4} '{f}'\n",
         .{
-            @tagName(instruction),
+            instruction,
             constant,
             chunk.constants.items[constant],
         },
@@ -154,9 +162,9 @@ fn longConstantInstruction(
 ) Io.Writer.Error!usize {
     const constant = mem.readInt(u24, chunk.code.items[offset + 1 .. offset + 4].ptr[0..3], .little);
     try w.print(
-        "{s:<16} {d:>4} '{f}'\n",
+        "{t:<16} {d:>4} '{f}'\n",
         .{
-            @tagName(instruction),
+            instruction,
             constant,
             chunk.constants.items[constant],
         },
@@ -172,29 +180,69 @@ fn shortInstruction(
 ) Io.Writer.Error!usize {
     const slot = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
     try w.print(
-        "{s:<16} {d:>4}\n",
+        "{t:<16} {d:>4}\n",
         .{
-            @tagName(instruction),
+            instruction,
             slot,
         },
     );
     return offset + 3;
 }
 
-fn popNInstruction(
+fn jumpInstruction(
+    w: *Io.Writer,
+    instruction: OpCode,
+    chunk: *const Chunk,
+    offset: usize,
+) Io.Writer.Error!usize {
+    const jump_offset = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
+    const instruction_index = offset + jump_offset + 3;
+    const jump_instruction: OpCode = @enumFromInt(chunk.code.items[instruction_index]);
+    const line = chunk.lines.items[instruction_index];
+    try w.print(
+        "{t:<16} {d:>4} -> {d} '{t}' on line {d}\n",
+        .{
+            instruction,
+            jump_offset,
+            instruction_index,
+            jump_instruction,
+            line,
+        },
+    );
+    return offset + 3;
+}
+
+fn loopInstruction(
+    w: *Io.Writer,
+    instruction: OpCode,
+    chunk: *const Chunk,
+    offset: usize,
+) Io.Writer.Error!usize {
+    const jump_offset = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
+    const instruction_index = offset - (jump_offset - 3);
+    const jump_instruction: OpCode = @enumFromInt(chunk.code.items[instruction_index]);
+    const line = chunk.lines.items[instruction_index];
+    try w.print(
+        "{t:<16} {d:>4} -> {d} '{t}' on line {d}\n",
+        .{
+            instruction,
+            jump_offset,
+            instruction_index,
+            jump_instruction,
+            line,
+        },
+    );
+    return offset + 3;
+}
+
+fn popNInstructions(
     w: *Io.Writer,
     instruction: OpCode,
     chunk: *const Chunk,
     offset: usize,
 ) Io.Writer.Error!usize {
     const n = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
-    try w.print(
-        "{s:<16} {d:>4}\n",
-        .{
-            @tagName(instruction),
-            n,
-        },
-    );
+    try w.print("{t:<16} {d:>4}\n", .{ instruction, n });
     return offset + 3;
 }
 
@@ -241,6 +289,116 @@ pub fn opCodeToBytes(ops: anytype) [ops.len]u8 {
     return bytes;
 }
 
+pub fn parseChunk(
+    gpa: Allocator,
+    bytes: []const u8,
+    constants: []const Value,
+    lines: []const u32,
+) Chunk {
+    var chunk = Chunk.init(gpa);
+    errdefer chunk.deinit();
+
+    if (lines.len != bytes.len) {
+        chunk.lines.appendNTimes(gpa, 0, bytes.len) catch oom();
+    } else {
+        chunk.lines.appendSlice(gpa, lines) catch oom();
+    }
+
+    chunk.code.appendSlice(gpa, bytes) catch oom();
+
+    chunk.constants.ensureTotalCapacityPrecise(gpa, constants.len) catch oom();
+    for (constants) |constant| {
+        if (constant == .string) {
+            const s = constant.string.data;
+            const string = if (chunk.strings.getKey(s)) |existing| existing else string: {
+                const arena = chunk.string_arena.allocator();
+                const duped = arena.dupe(u8, s) catch oom();
+                chunk.strings.put(arena, duped, {}) catch oom();
+                break :string duped;
+            };
+            chunk.constants.appendAssumeCapacity(.{ .string = .ref(string) });
+        } else {
+            chunk.constants.appendAssumeCapacity(constant);
+        }
+    }
+
+    return chunk;
+}
+
+/// We ignore line numbers here, if you care about them you have to test them separately.
+pub fn expectEqualChunks(w: *Io.Writer, expected: Chunk, actual: Chunk, source: []const u8) !void {
+    const testing = std.testing;
+
+    errdefer {
+        disassembleChunk(w, &expected, "expected chunk", source);
+        w.writeByte('\n') catch {};
+        disassembleChunk(w, &actual, "actual chunk", source);
+        w.writeByte('\n') catch {};
+    }
+
+    if (expected.code.items.len != actual.code.items.len) {
+        w.print(
+            "Unequal code lengths, expected={}, actual={}\n",
+            .{ expected.code.items.len, actual.code.items.len },
+        ) catch {};
+        return error.TestExpectedEqual;
+    }
+
+    var instruction_index: usize = 0;
+    while (instruction_index < expected.code.items.len) {
+        const expected_instruction: OpCode = @enumFromInt(expected.code.items[instruction_index]);
+        const actual_instruction: OpCode = @enumFromInt(actual.code.items[instruction_index]);
+
+        errdefer {
+            printWithLineNumbers(w, source) catch {};
+            w.print("First difference occurs on line {}\n", .{actual.lines.items[instruction_index]}) catch {};
+            w.print("==== expected ====\n", .{}) catch {};
+            _ = disassembleInstruction(w, &expected, instruction_index) catch {};
+            w.print("\n==== actual ====\n", .{}) catch {};
+            _ = disassembleInstruction(w, &actual, instruction_index) catch {};
+            w.writeByte('\n') catch {};
+        }
+
+        if (expected_instruction != actual_instruction) {
+            return error.TestExpectedEqual;
+        }
+
+        const arity = expected_instruction.arity();
+        if (arity > 0) {
+            const start = instruction_index + 1;
+            const end = instruction_index + 1 + arity;
+            const expected_argument = expected.code.items[start..end];
+            const actual_argument = actual.code.items[start..end];
+
+            try testing.expectEqualSlices(u8, expected_argument, actual_argument);
+        }
+
+        instruction_index += arity + 1;
+    }
+
+    if (expected.constants.items.len != actual.constants.items.len) {
+        w.print(
+            "Unequal constants length, expected={}, actual={}",
+            .{ expected.constants.items.len, actual.constants.items.len },
+        ) catch {};
+        return error.TestExpectedEqual;
+    }
+
+    for (0..expected.constants.items.len) |constant_index| {
+        const expected_constant = expected.constants.items[constant_index];
+        const actual_constant = actual.constants.items[constant_index];
+
+        errdefer {
+            w.print(
+                "Unequal constants\n=== expected ===\n{t}: {f}\n\n=== actual ===\n{t}: {f}\n",
+                .{ expected_constant, expected_constant, actual_constant, actual_constant },
+            ) catch {};
+        }
+
+        try testing.expectEqual(expected_constant, actual_constant);
+    }
+}
+
 const ers = @import("errors.zig");
 pub fn reportErrors(errors: anytype, file_name: []const u8, source: []const u8) void {
     var buffer: [64]u8 = undefined;
@@ -279,4 +437,12 @@ fn getLine(str: []const u8, line: u32) []const u8 {
         if (i == line - 1) return line_str;
     }
     return "";
+}
+
+pub fn printWithLineNumbers(w: *Io.Writer, str: []const u8) Io.Writer.Error!void {
+    var lines = mem.splitScalar(u8, str, '\n');
+    var line_number: usize = 1;
+    while (lines.next()) |line| : (line_number += 1) {
+        try w.print("{d} {s}\n", .{ line_number, line });
+    }
 }
