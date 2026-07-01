@@ -234,6 +234,7 @@ pub const Stmt = union(enum) {
             .infinite_for => |f| f.token,
             .break_stmt => |b| b.token,
             .continue_stmt => |c| c.token,
+            .return_stmt => |r| r.token,
             .print => |p| p.token,
         };
     }

@@ -4,6 +4,7 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const Io = std.Io;
 const testing = std.testing;
+const assert = std.debug.assert;
 
 const debug = @import("debug.zig");
 const dbg = debug.dbg;
@@ -146,7 +147,8 @@ const Parser = struct {
             if (p.checkNextEither(&.{ .colon, .colon_equal })) {
                 p.advance();
                 const var_decl = p.varDecl(false);
-                if (var_decl.var_decl.value != null and var_decl.var_decl.value.?.* != .function) {
+                const value = var_decl.var_decl.value;
+                if (value == null or value.?.* != .function) {
                     p.consumeSemicolon();
                 }
                 return var_decl;
@@ -408,6 +410,8 @@ const Parser = struct {
     fn varDecl(p: *Parser, mutable: bool) Ast.Stmt {
         const ident = p.previous;
 
+        // @breakpoint();
+
         var type_expr: ?*Ast.Expr = null;
         if (p.match(.colon)) {
             type_expr = p.expression(.lowest);
@@ -422,7 +426,8 @@ const Parser = struct {
                 };
             }
         } else {
-            p.consume(.colon_equal, "unreachable");
+            const ok = p.match(.colon_equal);
+            assert(ok);
         }
 
         const value = p.expression(.lowest);
