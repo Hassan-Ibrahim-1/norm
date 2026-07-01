@@ -410,8 +410,6 @@ const Parser = struct {
     fn varDecl(p: *Parser, mutable: bool) Ast.Stmt {
         const ident = p.previous;
 
-        // @breakpoint();
-
         var type_expr: ?*Ast.Expr = null;
         if (p.match(.colon)) {
             type_expr = p.expression(.lowest);
