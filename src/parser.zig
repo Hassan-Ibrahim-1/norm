@@ -379,13 +379,13 @@ const Parser = struct {
     }
 
     fn printStmt(p: *Parser) Ast.Stmt {
-        const print = p.previous;
+        const token = p.previous;
         p.consume(.left_paren, "Expect '(' after print");
         const expr = p.expression(.lowest);
 
         p.consume(.right_paren, "Expect ')' after print");
 
-        return .{ .print = .{ .print = print, .expr = expr } };
+        return .{ .print = .{ .token = token, .expr = expr } };
     }
 
     fn varDecl(p: *Parser, mutable: bool) Ast.Stmt {

@@ -99,13 +99,20 @@ const Sema = struct {
                         s.redefinedVariable(vd.ident);
                     }
                 },
-                else => {},
+                .block => {
+                    // TODO: disallow these as well
+                },
+                else => {
+                    if (@import("builtin").is_test) continue;
+                    s.disallowedGlobalStatementErr(stmt);
+                },
             }
         }
     }
 
     fn analyze(s: *Sema, stmts: []Ast.Stmt) []Nir.Stmt {
         s.analyzeGlobalSymbols(stmts);
+        if (s.errors.items.len > 0) return &.{};
 
         var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
 
@@ -162,7 +169,7 @@ const Sema = struct {
             },
             .print => |p| {
                 const nir_expr = s.expression(p.expr);
-                return .{ .print = .{ .print = p.print, .expr = nir_expr } };
+                return .{ .print = .{ .token = p.token, .expr = nir_expr } };
             },
             .block => |block| {
                 var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
@@ -600,6 +607,11 @@ const Sema = struct {
             "Variable assignments are not allowed in the global scope.",
             .{},
         );
+    }
+
+    fn disallowedGlobalStatementErr(s: *Sema, stmt: Ast.Stmt) void {
+        const line = stmt.token().line;
+        s.reportErrorLine(line, "A '{t}' statement is not allowed in global scope", .{stmt});
     }
 
     fn literal(s: *Sema, l: *Ast.Expr.Literal) *Nir.Expr {

@@ -296,7 +296,7 @@ pub const Compiler = struct {
             .var_decl => |vd| c.decl(vd),
             .print => |p| {
                 c.expression(p.expr);
-                c.emitOpCode(.op_temp_print, p.print.line);
+                c.emitOpCode(.op_temp_print, p.token.line);
             },
             .block => |block| {
                 c.beginScope(block.scope);
