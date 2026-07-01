@@ -709,8 +709,8 @@ const Parser = struct {
     fn jumpStmtOutsideLoop(p: *Parser, token: Token) void {
         p.reportError(.{
             .error_msg = switch (token.type) {
-                .kw_break => "Break statement outside a loop",
-                .kw_continue => "Continue statement outside a loop",
+                .kw_break => "Found break statement outside a loop",
+                .kw_continue => "Found continue statement outside a loop",
                 else => unreachable,
             },
             .line = token.line,
@@ -1911,7 +1911,7 @@ test "loop control statements: errors" {
     } = &.{
         .{
             .source = "break;",
-            .error_msg = "Break statement outside a loop",
+            .error_msg = "Found break statement outside a loop",
         },
         .{
             .source =
@@ -1923,7 +1923,7 @@ test "loop control statements: errors" {
             \\    break;
             \\}
             ,
-            .error_msg = "Break statement outside a loop",
+            .error_msg = "Found break statement outside a loop",
         },
         .{
             .source =
@@ -1936,7 +1936,7 @@ test "loop control statements: errors" {
             \\    continue;
             \\}
             ,
-            .error_msg = "Continue statement outside a loop",
+            .error_msg = "Found continue statement outside a loop",
         },
     };
 
