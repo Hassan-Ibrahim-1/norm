@@ -142,7 +142,7 @@ const Sema = struct {
                 // to write tests and then work on codegen and vm support for functions
                 //
                 // What I need exactly is to be able to infer the type of each global declaration
-                // before analyze function bodies. The main problem here is just finding circular
+                // before analyzing function bodies. The main problem here is just finding circular
                 // dependencies.
                 .var_decl => |vd| {
                     if (vd.type_expr) |type_expr| {
