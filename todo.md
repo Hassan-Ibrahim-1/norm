@@ -1,7 +1,7 @@
 ## Norm
 
 The obvious way of doing things should be the right way
-of doings things. And doing things should be easy.
+of doings things, and doing things should be easy.
 
 ### Doing now
 
