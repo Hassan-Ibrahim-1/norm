@@ -1,5 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const debug = @import("debug.zig");
+const oom = debug.oom;
 
 const Lexer = @This();
 
@@ -163,10 +165,6 @@ pub fn scanToken(l: *Lexer) Token {
             return l.errorToken("Unexpected character.");
         },
     }
-}
-
-fn oom() noreturn {
-    @panic("oom");
 }
 
 const ers = @import("errors.zig");

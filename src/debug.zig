@@ -428,7 +428,7 @@ pub fn printStmts(gpa: Allocator, stmts: anytype) []u8 {
     return aw.toOwnedSlice() catch oom();
 }
 
-fn oom() noreturn {
+pub fn oom() noreturn {
     @panic("oom");
 }
 

@@ -8,6 +8,7 @@ const assert = std.debug.assert;
 
 const debug = @import("debug.zig");
 const dbg = debug.dbg;
+const oom = debug.oom;
 const ers = @import("errors.zig");
 const Lexer = @import("Lexer.zig");
 const Token = Lexer.Token;
@@ -830,10 +831,6 @@ fn makeLiteral(arena: Allocator, value: Ast.Expr.Literal.Value, token: Token) *A
 
 fn makeExpr(arena: Allocator) *Ast.Expr {
     return arena.create(Ast.Expr) catch oom();
-}
-
-fn oom() noreturn {
-    @panic("oom");
 }
 
 fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {

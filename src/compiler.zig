@@ -8,6 +8,7 @@ const assert = std.debug.assert;
 
 const debug = @import("debug.zig");
 const dbg = debug.dbg;
+const oom = debug.oom;
 const ers = @import("errors.zig");
 const as = @import("cast.zig").as;
 const Lexer = @import("Lexer.zig");
@@ -163,10 +164,6 @@ pub const OpCode = enum(u8) {
         };
     }
 };
-
-fn oom() noreturn {
-    @panic("oom");
-}
 
 pub const Chunk = struct {
     gpa: Allocator,

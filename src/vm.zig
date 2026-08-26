@@ -13,6 +13,7 @@ const Chunk = compiler.Chunk;
 const OpCode = compiler.OpCode;
 const debug = @import("debug.zig");
 const dbg = debug.dbg;
+const oom = debug.oom;
 const Lexer = @import("Lexer.zig");
 const parser = @import("parser.zig");
 const sema = @import("sema.zig");
@@ -373,10 +374,6 @@ pub const Vm = struct {
         }
     }
 };
-
-fn oom() noreturn {
-    @panic("oom");
-}
 
 fn testRun(
     gpa: Allocator,

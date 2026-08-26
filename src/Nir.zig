@@ -10,6 +10,7 @@ const assert = std.debug.assert;
 const Allocator = mem.Allocator;
 const Ast = @import("Ast.zig");
 const debug = @import("debug.zig");
+const oom = debug.oom;
 const ers = @import("errors.zig");
 const Token = @import("Lexer.zig").Token;
 
@@ -657,7 +658,3 @@ arena: std.heap.ArenaAllocator,
 stmts: []Stmt,
 sym_table: SymbolTable,
 errors: []Diagnostics,
-
-fn oom() noreturn {
-    @panic("oom");
-}

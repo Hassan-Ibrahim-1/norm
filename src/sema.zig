@@ -5,6 +5,7 @@ const Allocator = mem.Allocator;
 
 const Ast = @import("Ast.zig");
 const debug = @import("debug.zig");
+const oom = debug.oom;
 const ers = @import("errors.zig");
 const Token = @import("Lexer.zig").Token;
 const tagEql = @import("trait.zig").tagEql;
@@ -1036,10 +1037,6 @@ pub fn analyze(gpa: Allocator, ast: *Ast) Nir {
         .stmts = stmts,
         .sym_table = sema.sym_table,
     };
-}
-
-fn oom() noreturn {
-    @panic("oom");
 }
 
 fn makeCall(
