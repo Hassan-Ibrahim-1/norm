@@ -204,22 +204,6 @@ pub const NormType = union(enum) {
         return ty == .n_float or ty == .n_int;
     }
 
-    pub fn isInt(ty: NormType) bool {
-        return ty == .n_int;
-    }
-
-    pub fn isFloat(ty: NormType) bool {
-        return ty == .n_float;
-    }
-
-    pub fn isBool(ty: NormType) bool {
-        return ty == .n_bool;
-    }
-
-    pub fn isString(ty: NormType) bool {
-        return ty == .n_string;
-    }
-
     pub fn isComparable(ty: NormType) bool {
         return switch (ty) {
             .n_int, .n_float, .n_bool, .n_string => true,

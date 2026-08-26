@@ -101,22 +101,6 @@ const Sema = struct {
         };
     }
 
-    fn inferGlobalType(s: *Sema, expr: *Ast.Expr) NormType {
-        return switch (expr.*) {
-            .binary => |*b| s.binary(b),
-            .unary => |*u| s.unary(u),
-            .cast => |*c| s.cast(c),
-            .grouping => |*g| s.grouping(g),
-            .identifier => |*i| s.identifier(i),
-            .literal => |*l| s.literal(l),
-            .function => |*f| s.analyzeFunctionSignature(f),
-            .call => |*c| t: {
-                s.globalCallError(c.token);
-                break :t .n_unknown;
-            },
-        };
-    }
-
     fn globalCallError(s: *Sema, token: Token) void {
         s.reportErrorLine(token.line, "Cannot call functions at compile time", .{});
     }
@@ -146,7 +130,8 @@ const Sema = struct {
             if (stmt != .var_decl) continue;
             const vd = stmt.var_decl;
 
-            const nir_type = if (vd.type_expr) |t| s.analyzeTypeExpr(t) else .n_unknown;
+            // We can assert that vd.value is not null because the parser disallows those cases.
+            const nir_type = if (vd.type_expr) |t| s.analyzeTypeExpr(t) else s.inferType(vd.value.?);
             const already_exists = s.sym_table.register(vd.ident.lexeme, nir_type, vd.mutable);
             if (already_exists) {
                 s.redefinedVariableErr(vd.ident);
@@ -629,6 +614,69 @@ const Sema = struct {
         };
     }
 
+    fn inferType(s: *Sema, expr: *Ast.Expr) NormType {
+        return switch (expr.*) {
+            .binary => |*b| b: {
+                const left = s.inferType(b.left);
+                const right = s.inferType(b.right);
+                break :b switch (b.operator.type) {
+                    .plus, .minus, .star, .slash => commonType(left, right),
+                    .equal_equal,
+                    .bang_equal,
+                    .greater,
+                    .greater_equal,
+                    .less,
+                    .less_equal,
+                    .kw_and,
+                    .kw_or,
+                    => .n_bool,
+                    else => unreachable,
+                };
+            },
+            .unary => |*u| s.inferType(u.expr),
+            .cast => |*c| switch (c.token.type) {
+                .kw_float => .n_float,
+                .kw_int => .n_int,
+                else => unreachable,
+            },
+            .grouping => |*g| s.inferType(g.expr),
+            .identifier => |*i| b: {
+                const sym = s.sym_table.tryFind(i.ident.lexeme) orelse {
+                    s.undefinedVariableErr(i.ident);
+                    return .n_unknown;
+                };
+                break :b sym.type;
+            },
+            .literal => |*l| litType(l),
+            .function => |*f| b: {
+                const parameters = s.arena.alloc(Nir.Expr.Function.Parameter, f.parameters.len) catch oom();
+                for (f.parameters, 0..) |param, i| {
+                    const param_type = s.analyzeTypeExpr(param.type);
+                    parameters[i] = .{ .name = param.name, .type = param_type };
+                }
+
+                const return_type =
+                    if (f.return_type) |return_type| s.analyzeTypeExpr(return_type) else .n_void;
+
+                const ty = s.arena.create(NormType.Function) catch oom();
+                ty.* = .{
+                    .parameters = parameters,
+                    .return_type = return_type,
+                };
+
+                break :b .{ .n_function = ty };
+            },
+            .call => |*c| {
+                const callee_ty = s.inferType(c.callee);
+                if (callee_ty != .n_function) {
+                    s.expectedFunctionCallee(callee_ty, c.token);
+                    return .n_unknown;
+                }
+                return callee_ty.n_function.return_type;
+            },
+        };
+    }
+
     fn tryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
         if (target == .n_unknown) return null;
         if (tagEql(expr.type, target)) return expr;
@@ -662,7 +710,7 @@ const Sema = struct {
                     const cast_right = s.tryCast(right, common_type) orelse return s.castErr(right, common_type);
                     return makeBinary(arena, cast_left, b.operator, cast_right, common_type);
                 }
-                if (left.type.isString() and right.type.isString()) {
+                if (left.type == .n_string and right.type == .n_string) {
                     return makeBinary(arena, left, b.operator, right, .n_string);
                 }
                 return s.invalidBinaryOp(left, b.operator, right);
@@ -741,7 +789,7 @@ const Sema = struct {
                 return s.reportErrorInv(expr, "Cannot negate {f}", .{expr.type});
             },
             .bang => {
-                if (expr.type.isBool()) {
+                if (expr.type == .n_bool) {
                     return makeUnary(arena, expr, u.operator, expr.type);
                 }
                 return s.reportErrorInv(expr, "! only supports bools, got {f}", .{expr.type});
@@ -824,14 +872,18 @@ const Sema = struct {
         s.reportErrorLine(line, "A '{t}' statement is not allowed in global scope", .{stmt});
     }
 
-    fn literal(s: *Sema, l: *Ast.Expr.Literal) *Nir.Expr {
-        const ty: NormType = switch (l.value) {
+    fn litType(l: *Ast.Expr.Literal) NormType {
+        return switch (l.value) {
             .float => .n_float,
             .integer => .n_int,
             .boolean => .n_bool,
             .string => .n_string,
             .nil => @panic("todo"),
         };
+    }
+
+    fn literal(s: *Sema, l: *Ast.Expr.Literal) *Nir.Expr {
+        const ty = litType(l);
         return makeLiteral(s.arena, .fromAst(l.value), l.token, ty);
     }
 
@@ -895,12 +947,10 @@ const Sema = struct {
     fn call(s: *Sema, c: *Ast.Expr.Call) *Nir.Expr {
         const callee = s.expression(c.callee);
         if (callee.type != .n_function) {
-            return s.expectedFunctionCallee(callee.type, c.token);
+            s.expectedFunctionCallee(callee.type, c.token);
+            return s.invalid_expr;
         }
 
-        // how do i actually access the function declaration? I only need
-        // the type of the function nothing else, maybe I can add some info
-        // to n_function in NormType like parameter list, return type etc.
         const callee_fn = callee.type.n_function;
         if (c.args.len != callee_fn.parameters.len) {
             return s.badArgumentLength(c.args.len, callee_fn.parameters.len, c.token);
@@ -917,9 +967,8 @@ const Sema = struct {
         return makeCall(s.arena, callee, c.token, args);
     }
 
-    fn expectedFunctionCallee(s: *Sema, callee_type: NormType, token: Token) *Nir.Expr {
+    fn expectedFunctionCallee(s: *Sema, callee_type: NormType, token: Token) void {
         s.reportErrorLine(token.line, "Expected callee to be a function but got {f} instead", .{callee_type});
-        return s.invalid_expr;
     }
 
     fn badArgumentLength(s: *Sema, actual: usize, expected: usize, token: Token) *Nir.Expr {
