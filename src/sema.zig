@@ -94,7 +94,6 @@ const Sema = struct {
             .kw_bool => .n_bool,
 
             .identifier => {
-                dbg("expr", expr);
                 @panic("TODO");
             },
             else => unreachable,
@@ -226,7 +225,8 @@ const Sema = struct {
             if (decl.value == null) continue;
 
             var ident_list: std.ArrayList(Ast.Expr.Identifier) = .empty;
-            s.collectIdentifiers(arena, decl.value.?, &ident_list);
+            s.collectIdentifiers(arena, decl.value.?, s.sym_table.top_scope, &ident_list);
+            if (s.errors.items.len > 0) return &.{};
 
             decl_map.putAssumeCapacity(
                 decl.ident.lexeme,
@@ -247,27 +247,36 @@ const Sema = struct {
             }
         }
 
-        dbg("ordered", ordered_decls.items);
-
         return ordered_decls.toOwnedSlice(s.scratch) catch oom();
     }
 
-    fn collectIdentifiers(s: *Sema, gpa: Allocator, expr: *Ast.Expr, ident_list: *std.ArrayList(Ast.Expr.Identifier)) void {
+    fn collectIdentifiers(
+        s: *Sema,
+        gpa: Allocator,
+        expr: *Ast.Expr,
+        scope: *Nir.Scope,
+        ident_list: *std.ArrayList(Ast.Expr.Identifier),
+    ) void {
         switch (expr.*) {
             .binary => |b| {
-                s.collectIdentifiers(gpa, b.left, ident_list);
-                s.collectIdentifiers(gpa, b.right, ident_list);
+                s.collectIdentifiers(gpa, b.left, scope, ident_list);
+                s.collectIdentifiers(gpa, b.right, scope, ident_list);
             },
-            .unary => |u| s.collectIdentifiers(gpa, u.expr, ident_list),
-            .cast => |c| s.collectIdentifiers(gpa, c.expr, ident_list),
-            .grouping => |g| s.collectIdentifiers(gpa, g.expr, ident_list),
+            .unary => |u| s.collectIdentifiers(gpa, u.expr, scope, ident_list),
+            .cast => |c| s.collectIdentifiers(gpa, c.expr, scope, ident_list),
+            .grouping => |g| s.collectIdentifiers(gpa, g.expr, scope, ident_list),
             .identifier => |i| {
+                const sym = s.sym_table.tryFindScoped(i.ident.lexeme, scope);
+                if (sym == null) {
+                    s.undefinedVariableErr(i.ident);
+                    return;
+                }
                 ident_list.append(gpa, i) catch oom();
             },
             .call => |c| {
-                s.collectIdentifiers(gpa, c.callee, ident_list);
+                s.collectIdentifiers(gpa, c.callee, scope, ident_list);
                 for (c.args) |arg| {
-                    s.collectIdentifiers(gpa, arg, ident_list);
+                    s.collectIdentifiers(gpa, arg, scope, ident_list);
                 }
             },
             .literal, .function => {},
@@ -285,7 +294,7 @@ const Sema = struct {
         for (stmts) |stmt| {
             if (stmt == .var_decl) continue;
             const nir_stmt = s.statement(stmt);
-            nir_stmts.appendAssumeCapacity(nir_stmt);
+            nir_stmts.append(s.arena, nir_stmt) catch oom();
         }
 
         return nir_stmts.items;
@@ -495,7 +504,6 @@ const Sema = struct {
                     };
                     const nir_stmt = s.statement(ast_stmt);
                     if (s.errors.items.len > 0) {
-                        dbg("errors", s.errors.items);
                         @panic("had an error");
                     }
                     break :s switch (nir_stmt) {

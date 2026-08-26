@@ -159,19 +159,19 @@ pub const SymbolTable = struct {
     }
 
     pub fn tryFind(st: *SymbolTable, name: []const u8) ?*Symbol {
-        return st.findSym(name, st.current_scope);
+        return st.tryFindScoped(name, st.current_scope);
     }
 
     pub fn find(st: *SymbolTable, name: []const u8, scope: *Scope) *Symbol {
-        return st.findSym(name, scope).?;
+        return st.tryFindScoped(name, scope).?;
     }
 
-    fn findSym(st: *SymbolTable, name: []const u8, scope: *Scope) ?*Symbol {
+    pub fn tryFindScoped(st: *SymbolTable, name: []const u8, scope: *Scope) ?*Symbol {
         switch (scope.level) {
             .top => return st.top.getPtr(name),
             .local => {
                 const locals = st.locals.getPtr(scope).?;
-                return locals.locals.getPtr(name) orelse st.findSym(name, scope.parent);
+                return locals.locals.getPtr(name) orelse st.tryFindScoped(name, scope.parent);
             },
         }
     }
