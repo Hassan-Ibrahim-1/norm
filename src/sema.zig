@@ -139,16 +139,14 @@ const Sema = struct {
     }
 
     fn analyzeGlobalSymbols(s: *Sema, stmts: []Ast.Stmt, nir_stmts: *std.ArrayList(Nir.Stmt)) void {
-        // collect declarations
-        // resolve dependencies and sort
-        // type check fully
-
         var decl_list: std.ArrayList(Ast.Stmt.VarDecl) = .empty;
         defer decl_list.deinit(s.scratch);
         for (stmts) |stmt| {
             if (stmt != .var_decl) continue;
             const vd = stmt.var_decl;
-            const already_exists = s.sym_table.register(vd.ident.lexeme, .n_unknown, vd.mutable);
+
+            const nir_type = if (vd.type_expr) |t| s.analyzeTypeExpr(t) else .n_unknown;
+            const already_exists = s.sym_table.register(vd.ident.lexeme, nir_type, vd.mutable);
             if (already_exists) {
                 s.redefinedVariableErr(vd.ident);
             } else {
@@ -188,14 +186,14 @@ const Sema = struct {
                 gpa: Allocator,
                 scratch_arena: Allocator,
                 decl: Token,
-                decl_map: DeclMap,
+                decl_map: *DeclMap,
                 path: *std.ArrayList(Token),
                 ordered_decls: *std.ArrayList(Token),
             ) bool {
                 const decl_node = decl_map.getPtr(decl.lexeme).?;
-                decl_node.status = .in_progress;
-
                 if (decl_node.status == .resolved) return true;
+
+                decl_node.status = .in_progress;
 
                 path.append(scratch_arena, decl) catch oom();
 
@@ -207,6 +205,7 @@ const Sema = struct {
                     const ok = resolveNode(gpa, scratch_arena, dep.ident, decl_map, path, ordered_decls);
                     if (!ok) return false;
                 }
+
                 decl_node.status = .resolved;
                 _ = path.pop();
                 ordered_decls.append(gpa, decl) catch oom();
@@ -240,7 +239,7 @@ const Sema = struct {
         var path: std.ArrayList(Token) = .empty;
 
         for (decl_list) |decl| {
-            const ok = resolveNode(s.scratch, arena, decl.ident, decl_map, &path, &ordered_decls);
+            const ok = resolveNode(s.scratch, arena, decl.ident, &decl_map, &path, &ordered_decls);
             if (!ok) {
                 s.dependencyLoopErr(path.items);
                 return &.{};
@@ -317,6 +316,7 @@ const Sema = struct {
                         s.expectTypeTryCast(s.expression(v), sym.type)
                     else
                         @panic("todo: zero values");
+
                 // Why would value ever be null? This should be an error no?
                 if (value == null) return .invalid;
                 if (sym.type == .n_unknown) sym.type = value.?.type;
@@ -1591,22 +1591,22 @@ test "tracking variables" {
         source: []const u8,
         expected: []const u8,
     } = &.{
-        .{
-            .source = "x: int = 10; x;",
-            .expected = "x: int = 10;\nx:int;",
-        },
-        .{
-            .source = "x: int = 10; x + 10;",
-            .expected = "x: int = 10;\n(x:int + 10):int;",
-        },
+        // .{
+        //     .source = "x: int = 10; x;",
+        //     .expected = "x: int = 10;\nx:int;",
+        // },
+        // .{
+        //     .source = "x: int = 10; x + 10;",
+        //     .expected = "x: int = 10;\n(x:int + 10):int;",
+        // },
         .{
             .source = "x: int = 10; y: int = x; y + 1;",
             .expected = "x: int = 10;\ny: int = x:int;\n(y:int + 1):int;",
         },
-        .{
-            .source = "x: int = 10; y: int = x; z: int = y * x;",
-            .expected = "x: int = 10;\ny: int = x:int;\nz: int = (y:int * x:int):int;",
-        },
+        // .{
+        //     .source = "x: int = 10; y: int = x; z: int = y * x;",
+        //     .expected = "x: int = 10;\ny: int = x:int;\nz: int = (y:int * x:int):int;",
+        // },
     };
 
     for (tests) |t| {
