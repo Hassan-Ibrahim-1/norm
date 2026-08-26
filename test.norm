@@ -1,3 +1,6 @@
-x: int = 10;
-y: int = x;
-y + 1;
+x := fn () int {
+    return add(2,3);
+}
+add := fn (a: int, b: int) int {
+    return a + b;
+}

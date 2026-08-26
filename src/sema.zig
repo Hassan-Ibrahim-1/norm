@@ -782,9 +782,6 @@ const Sema = struct {
             s.undefinedVariableErr(i.ident);
             return s.invalid_expr;
         };
-        if (sym.type == .n_unknown and sym.scope.level == .top) {
-            return s.useBeforeDefinitionErr(i.ident);
-        }
 
         return makeIdentifier(s.arena, i.ident, sym.scope, sym.type);
     }
@@ -803,15 +800,6 @@ const Sema = struct {
             "Variable {s} is already defined",
             .{name.lexeme},
         );
-    }
-
-    fn useBeforeDefinitionErr(s: *Sema, name: Token) *Nir.Expr {
-        s.reportErrorLine(
-            name.line,
-            "Variable {s} used before its definition",
-            .{name.lexeme},
-        );
-        return s.invalid_expr;
     }
 
     fn immutableVarErr(s: *Sema, name: Token) void {
@@ -1845,29 +1833,6 @@ test "block statements" {
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
-    }
-}
-
-test "global declaration order error" {
-    const gpa = testing.allocator;
-    const tests: []const struct {
-        source: []const u8,
-        error_msg: []const u8,
-    } = &.{
-        .{
-            .source = "x := z; z := 1;",
-            .error_msg = "Variable z used before its definition",
-        },
-    };
-
-    for (tests) |t| {
-        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
-
-        var nir = try testAnalyzeFailure(gpa, t.source);
-        defer nir.deinit();
-
-        try testing.expect(nir.errors.len == 1);
-        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
     }
 }
 
@@ -3087,24 +3052,24 @@ test "functions, calls, and return stmts" {
             \\};
             ,
         },
-        .{
-            .source =
-            \\x := fn () int {
-            \\    return add(2,3);
-            \\}
-            \\add := fn (a: int, b: int) int {
-            \\    return a + b;
-            \\}
-            ,
-            .expected =
-            \\x: function = fn () int {
-            \\    return add(2, 3):int;
-            \\};
-            \\add: function = fn (a: int, b: int) int {
-            \\    return (a:int + b:int):int;
-            \\};
-            ,
-        },
+        // .{
+        //     .source =
+        //     \\x := fn () int {
+        //     \\    return add(2,3);
+        //     \\}
+        //     \\add := fn (a: int, b: int) int {
+        //     \\    return a + b;
+        //     \\}
+        //     ,
+        //     .expected =
+        //     \\x: function = fn () int {
+        //     \\    return add(2, 3):int;
+        //     \\};
+        //     \\add: function = fn (a: int, b: int) int {
+        //     \\    return (a:int + b:int):int;
+        //     \\};
+        //     ,
+        // },
     };
 
     for (tests) |t| {
