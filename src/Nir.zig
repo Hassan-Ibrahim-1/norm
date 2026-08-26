@@ -82,6 +82,17 @@ pub const SymbolTable = struct {
         return false;
     }
 
+    /// If the return value is null then it means that the symbol
+    /// has already been defined.
+    pub fn findOrRegister(st: *SymbolTable, name: []const u8, mutable: bool) ?*Symbol {
+        if (st.current_scope.level == .top) {
+            return st.tryFind(name);
+        }
+        const already_exists = st.register(name, .n_unknown, mutable);
+        if (already_exists) return null;
+        return st.tryFind(name).?;
+    }
+
     fn registerSym(st: *SymbolTable, name: []const u8, ty: NormType, mutable: bool) void {
         switch (st.current_scope.level) {
             .top => {
@@ -164,17 +175,6 @@ pub const SymbolTable = struct {
             },
         }
     }
-
-    /// If the return value is null then it means that the symbol
-    /// has already been defined.
-    pub fn findOrRegister(st: *SymbolTable, name: []const u8, mutable: bool) ?*Symbol {
-        if (st.current_scope.level == .top) {
-            return st.tryFind(name);
-        }
-        const already_exists = st.register(name, .n_invalid, mutable);
-        if (already_exists) return null;
-        return st.tryFind(name).?;
-    }
 };
 
 pub const NormType = union(enum) {
@@ -185,7 +185,7 @@ pub const NormType = union(enum) {
 
     pub const Tag = std.meta.Tag(NormType);
 
-    n_invalid,
+    n_unknown,
 
     n_int,
     n_float,
@@ -588,7 +588,7 @@ pub const Expr = struct {
     },
 
     pub const invalid: Expr = .{
-        .type = .n_invalid,
+        .type = .n_unknown,
         .kind = undefined,
     };
 
@@ -606,7 +606,7 @@ pub const Expr = struct {
     }
 
     pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
-        if (expr.type == .n_invalid) {
+        if (expr.type == .n_unknown) {
             @panic("found invalid type - an error was not reported in sema");
         }
 

@@ -262,11 +262,13 @@ pub fn dbg(prefix: []const u8, value: anytype) void {
 }
 
 pub fn dbgr(prefix: []const u8, value: anytype) @TypeOf(value) {
-    std.debug.print("{s} = {f}\n", .{
-        prefix,
-        std.json.fmt(value, .{ .whitespace = .indent_4 }),
-    });
+    dbg(prefix, value);
     return value;
+}
+
+pub fn dbgp(prefix: []const u8, value: anytype) void {
+    dbg(prefix, value);
+    @panic("oops");
 }
 
 const trait = @import("trait.zig");

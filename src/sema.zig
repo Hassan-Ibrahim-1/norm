@@ -14,6 +14,8 @@ const NormType = Nir.NormType;
 
 const Sema = struct {
     arena: Allocator,
+    scratch: Allocator,
+
     errors: std.ArrayList(Nir.Diagnostics),
     // TODO: reset on statement boundary
     panic_mode: bool,
@@ -60,20 +62,22 @@ const Sema = struct {
         if (l.isNumeric() or r.isNumeric()) {
             return .n_float;
         }
-        return .n_invalid;
+        return .n_unknown;
     }
 
-    fn init(gpa: Allocator, arena: Allocator) Sema {
+    fn init(gpa: Allocator, scratch: Allocator, arena: Allocator) Sema {
         const sym_table: Nir.SymbolTable = .init(gpa);
         return .{
+            .arena = arena,
+            .scratch = scratch,
+
             .invalid_expr = makeInvalid(arena),
             .sym_table = sym_table,
-            .arena = arena,
             .errors = .empty,
             .analyzing_stmt = .other,
             .current_for_block_scope = sym_table.top_scope,
             .panic_mode = false,
-            .function_type = .n_invalid,
+            .function_type = .n_unknown,
         };
     }
 
@@ -108,7 +112,7 @@ const Sema = struct {
             .function => |*f| s.analyzeFunctionSignature(f),
             .call => |*c| t: {
                 s.globalCallError(c.token);
-                break :t .n_invalid;
+                break :t .n_unknown;
             },
         };
     }
@@ -135,61 +139,153 @@ const Sema = struct {
         return ty;
     }
 
-    fn analyzeGlobalSymbols(s: *Sema, stmts: []Ast.Stmt) void {
+    fn analyzeGlobalSymbols(s: *Sema, stmts: []Ast.Stmt, nir_stmts: *std.ArrayList(Nir.Stmt)) void {
+        // collect declarations
+        // resolve dependencies and sort
+        // type check fully
+
+        var decl_list: std.ArrayList(Ast.Stmt.VarDecl) = .empty;
+        defer decl_list.deinit(s.scratch);
         for (stmts) |stmt| {
-            switch (stmt) {
-                // TODO: figure out how to be able to handle circular dependencies
-                // I want variables to be able to refer to each other.
-                // Main problem right now is that functions can't refer to each
-                // other in their bodies. Everything else seems fine, just need
-                // to write tests and then work on codegen and vm support for functions
-                //
-                // What I need exactly is to be able to infer the type of each global declaration
-                // before analyzing function bodies. The main problem here is just finding circular
-                // dependencies.
-                .var_decl => |vd| {
-                    if (vd.type_expr) |type_expr| {
-                        const var_type = s.analyzeTypeExpr(type_expr);
-                        _ = var_type; // autofix
-                    }
-                    // const already_exists = s.sym_table.register(vd.ident.lexeme, var_type, vd.mutable);
-                    // if (already_exists) {
-                    //     s.redefinedVariableErr(vd.ident);
-                    // }
-                },
-                .block => {
-                    // TODO: disallow these as well
-                },
-                else => {
-                    if (@import("builtin").is_test) continue;
-                    s.disallowedGlobalStatementErr(stmt);
-                },
+            if (stmt != .var_decl) continue;
+            const vd = stmt.var_decl;
+            const already_exists = s.sym_table.register(vd.ident.lexeme, .n_unknown, vd.mutable);
+            if (already_exists) {
+                s.redefinedVariableErr(vd.ident);
+            } else {
+                decl_list.append(s.scratch, vd) catch oom();
+            }
+        }
+
+        const ordered_decls = s.resolveGlobals(decl_list.items);
+        defer s.scratch.free(ordered_decls);
+
+        for (ordered_decls) |decl| {
+            for (decl_list.items) |decl_stmt| {
+                if (mem.eql(u8, decl.lexeme, decl_stmt.ident.lexeme)) {
+                    const nir_stmt = s.statement(.{ .var_decl = decl_stmt });
+                    nir_stmts.append(s.arena, nir_stmt) catch oom();
+                    break;
+                }
             }
         }
     }
 
-    fn analyze(s: *Sema, stmts: []Ast.Stmt) []Nir.Stmt {
-        s.analyzeGlobalSymbols(stmts);
-        if (s.errors.items.len > 0) return &.{};
+    fn resolveGlobals(s: *Sema, decl_list: []Ast.Stmt.VarDecl) []Token {
+        const Decl = struct {
+            dependencies: []Ast.Expr.Identifier,
+            status: enum {
+                unresolved,
+                in_progress,
+                resolved,
+            },
+        };
 
-        var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
+        const DeclMap = std.StringHashMapUnmanaged(Decl);
 
-        // Hoist up all the variable declarations. Makes it simpler for the
-        // compiler, but I'm not sure if this is the best way to do things
-        // though. Variables have to be initialized before declaration
-        // but what if I just emit code for all global var decls before
-        // codegen for other stuff. This also helps sema with variable
-        // redefinition stuff.
-        for (stmts) |stmt| {
-            if (stmt != .var_decl) continue;
-            const nir_stmt = s.statement(stmt);
-            nir_stmts.append(s.arena, nir_stmt) catch oom();
+        const resolveNode = struct {
+            /// The return value is the path. If non-empty then a cycle was found.
+            fn resolveNode(
+                gpa: Allocator,
+                scratch_arena: Allocator,
+                decl: Token,
+                decl_map: DeclMap,
+                path: *std.ArrayList(Token),
+                ordered_decls: *std.ArrayList(Token),
+            ) bool {
+                const decl_node = decl_map.getPtr(decl.lexeme).?;
+                decl_node.status = .in_progress;
+
+                if (decl_node.status == .resolved) return true;
+
+                path.append(scratch_arena, decl) catch oom();
+
+                for (decl_node.dependencies) |dep| {
+                    const dep_node = decl_map.getPtr(dep.ident.lexeme).?;
+                    if (dep_node.status == .in_progress) {
+                        return false;
+                    }
+                    const ok = resolveNode(gpa, scratch_arena, dep.ident, decl_map, path, ordered_decls);
+                    if (!ok) return false;
+                }
+                decl_node.status = .resolved;
+                _ = path.pop();
+                ordered_decls.append(gpa, decl) catch oom();
+                return true;
+            }
+        }.resolveNode;
+
+        var scratch_arena: std.heap.ArenaAllocator = .init(s.scratch);
+        defer scratch_arena.deinit();
+        const arena = scratch_arena.allocator();
+
+        var decl_map: DeclMap = .empty;
+        decl_map.ensureTotalCapacity(arena, @intCast(decl_list.len)) catch oom();
+
+        for (decl_list) |decl| {
+            if (decl.value == null) continue;
+
+            var ident_list: std.ArrayList(Ast.Expr.Identifier) = .empty;
+            s.collectIdentifiers(arena, decl.value.?, &ident_list);
+
+            decl_map.putAssumeCapacity(
+                decl.ident.lexeme,
+                .{ .status = .unresolved, .dependencies = ident_list.items },
+            );
         }
+
+        var ordered_decls: std.ArrayList(Token) = .empty;
+        defer ordered_decls.deinit(s.scratch);
+
+        var path: std.ArrayList(Token) = .empty;
+
+        for (decl_list) |decl| {
+            const ok = resolveNode(s.scratch, arena, decl.ident, decl_map, &path, &ordered_decls);
+            if (!ok) {
+                s.dependencyLoopErr(path.items);
+                return &.{};
+            }
+        }
+
+        dbg("ordered", ordered_decls.items);
+
+        return ordered_decls.toOwnedSlice(s.scratch) catch oom();
+    }
+
+    fn collectIdentifiers(s: *Sema, gpa: Allocator, expr: *Ast.Expr, ident_list: *std.ArrayList(Ast.Expr.Identifier)) void {
+        switch (expr.*) {
+            .binary => |b| {
+                s.collectIdentifiers(gpa, b.left, ident_list);
+                s.collectIdentifiers(gpa, b.right, ident_list);
+            },
+            .unary => |u| s.collectIdentifiers(gpa, u.expr, ident_list),
+            .cast => |c| s.collectIdentifiers(gpa, c.expr, ident_list),
+            .grouping => |g| s.collectIdentifiers(gpa, g.expr, ident_list),
+            .identifier => |i| {
+                ident_list.append(gpa, i) catch oom();
+            },
+            .call => |c| {
+                s.collectIdentifiers(gpa, c.callee, ident_list);
+                for (c.args) |arg| {
+                    s.collectIdentifiers(gpa, arg, ident_list);
+                }
+            },
+            .literal, .function => {},
+        }
+    }
+
+    fn analyze(s: *Sema, stmts: []Ast.Stmt) []Nir.Stmt {
+        var nir_stmts: std.ArrayList(Nir.Stmt) = .empty;
+        nir_stmts.ensureTotalCapacityPrecise(s.arena, stmts.len) catch oom();
+
+        s.analyzeGlobalSymbols(stmts, &nir_stmts);
+
+        if (s.errors.items.len > 0) return &.{};
 
         for (stmts) |stmt| {
             if (stmt == .var_decl) continue;
             const nir_stmt = s.statement(stmt);
-            nir_stmts.append(s.arena, nir_stmt) catch oom();
+            nir_stmts.appendAssumeCapacity(nir_stmt);
         }
 
         return nir_stmts.items;
@@ -212,9 +308,9 @@ const Sema = struct {
                         s.expectTypeTryCast(s.expression(v), sym.type)
                     else
                         @panic("todo: zero values");
-                // Why would value every be null? This should be an error no?
+                // Why would value ever be null? This should be an error no?
                 if (value == null) return .invalid;
-                if (sym.type == .n_invalid) sym.type = value.?.type;
+                if (sym.type == .n_unknown) sym.type = value.?.type;
                 if (sym.type == .n_void) {
                     s.voidAssignErr(vd.ident);
                     return .invalid;
@@ -468,7 +564,7 @@ const Sema = struct {
             "Expected type identifier found {f}. TODO: support struct/enum expressions",
             .{expr},
         );
-        return .n_invalid;
+        return .n_unknown;
     }
 
     fn alwaysReturnsErr(s: *Sema, return_type: NormType, token: Token) *Nir.Expr {
@@ -478,6 +574,29 @@ const Sema = struct {
             .{return_type},
         );
         return s.invalid_expr;
+    }
+
+    fn dependencyLoopErr(s: *Sema, path: []Token) void {
+        var aw = Io.Writer.Allocating.init(s.arena);
+        defer aw.deinit();
+
+        var w = &aw.writer;
+
+        for (path, 0..) |tok, i| {
+            if (i < path.len - 1) {
+                w.print("{s} -> ", .{tok.lexeme}) catch {};
+            } else {
+                w.print("{s}", .{tok.lexeme}) catch {};
+            }
+        }
+
+        const path_string = aw.written();
+
+        s.reportErrorLine(
+            path[0].line,
+            "Dependency loop detected: {s}",
+            .{path_string},
+        );
     }
 
     fn wrongReturnType(s: *Sema, actual: NormType, expected: NormType, token: Token) void {
@@ -502,7 +621,7 @@ const Sema = struct {
     }
 
     fn tryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
-        if (target == .n_invalid) return null;
+        if (target == .n_unknown) return null;
         if (tagEql(expr.type, target)) return expr;
 
         const arena = s.arena;
@@ -513,7 +632,7 @@ const Sema = struct {
     }
 
     fn expectTypeTryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
-        if (tagEql(expr.type, target) or target == .n_invalid) return expr;
+        if (tagEql(expr.type, target) or target == .n_unknown) return expr;
         const casted = s.tryCast(expr, target) orelse {
             s.reportError(expr, "Expected {f} got {f}", .{ target, expr.type });
             return null;
@@ -626,7 +745,7 @@ const Sema = struct {
         const arena = s.arena;
 
         const expr = s.expression(c.expr);
-        if (expr.type == .n_invalid) return s.invalid_expr;
+        if (expr.type == .n_unknown) return s.invalid_expr;
 
         const target_type: NormType = switch (c.token.type) {
             .kw_float => if (!s.expectType(expr, .n_int, "Cannot cast {f} to float, expected int", .{expr.type}))
@@ -645,7 +764,7 @@ const Sema = struct {
 
     fn grouping(s: *Sema, g: *Ast.Expr.Grouping) *Nir.Expr {
         const expr = s.expression(g.expr);
-        if (expr.type == .n_invalid) return s.invalid_expr;
+        if (expr.type == .n_unknown) return s.invalid_expr;
         return makeGrouping(s.arena, expr, g.paren, expr.type);
     }
 
@@ -654,7 +773,7 @@ const Sema = struct {
             s.undefinedVariableErr(i.ident);
             return s.invalid_expr;
         };
-        if (sym.type == .n_invalid and sym.scope.level == .top) {
+        if (sym.type == .n_unknown and sym.scope.level == .top) {
             return s.useBeforeDefinitionErr(i.ident);
         }
 
@@ -899,7 +1018,7 @@ pub fn analyze(gpa: Allocator, ast: *Ast) Nir {
 
     var arena: std.heap.ArenaAllocator = .init(gpa);
 
-    var sema = Sema.init(gpa, arena.allocator());
+    var sema = Sema.init(gpa, gpa, arena.allocator());
 
     const stmts = sema.analyze(ast.stmts);
 
