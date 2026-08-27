@@ -31,7 +31,8 @@ const Sema = struct {
     // FIX: This is a bad solution, the language allows declaring functions within
     // functions so this won't work. Having a context is probably the right thing to
     // do here.
-    /// `n_invalid` if in global scope
+
+    /// `n_unknown` if in global scope
     function_type: NormType,
 
     const AnalyzingStmt = union(enum) {
