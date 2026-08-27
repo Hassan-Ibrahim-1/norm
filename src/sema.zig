@@ -149,7 +149,7 @@ const Sema = struct {
         const DeclMap = std.StringHashMapUnmanaged(Decl);
 
         const resolveNode = struct {
-            /// The return value is the path. If non-empty then a cycle was found.
+            /// Returns the closed dependency cycle, or null after successful resolution.
             fn resolveNode(
                 gpa: Allocator,
                 scratch_arena: Allocator,
@@ -157,9 +157,17 @@ const Sema = struct {
                 decl_map: *DeclMap,
                 path: *std.ArrayList(Token),
                 ordered_decls: *std.ArrayList(Ast.Stmt.VarDecl),
-            ) bool {
+            ) ?[]Token {
                 const decl_node = decl_map.getPtr(decl.lexeme).?;
-                if (decl_node.status == .resolved) return true;
+                if (decl_node.status == .resolved) return null;
+                if (decl_node.status == .in_progress) {
+                    const start = for (path.items, 0..) |path_decl, i| {
+                        if (mem.eql(u8, path_decl.lexeme, decl.lexeme)) break i;
+                    } else unreachable;
+
+                    path.append(scratch_arena, decl) catch oom();
+                    return path.items[start..];
+                }
 
                 decl_node.status = .in_progress;
 
@@ -167,17 +175,14 @@ const Sema = struct {
 
                 for (decl_node.dependencies) |dep| {
                     const dep_node = decl_map.getPtr(dep.ident.lexeme).?;
-                    if (dep_node.status == .in_progress) {
-                        return false;
-                    }
-                    const ok = resolveNode(gpa, scratch_arena, dep.ident, decl_map, path, ordered_decls);
-                    if (!ok) return false;
+                    const cycle = resolveNode(gpa, scratch_arena, dep_node.stmt.ident, decl_map, path, ordered_decls);
+                    if (cycle) |tokens| return tokens;
                 }
 
                 decl_node.status = .resolved;
                 _ = path.pop();
                 ordered_decls.append(gpa, decl_node.stmt) catch oom();
-                return true;
+                return null;
             }
         }.resolveNode;
 
@@ -207,9 +212,9 @@ const Sema = struct {
         var path: std.ArrayList(Token) = .empty;
 
         for (decl_list) |decl| {
-            const ok = resolveNode(s.scratch, arena, decl.ident, &decl_map, &path, &ordered_decls);
-            if (!ok) {
-                s.dependencyLoopErr(path.items);
+            const cycle = resolveNode(s.scratch, arena, decl.ident, &decl_map, &path, &ordered_decls);
+            if (cycle) |tokens| {
+                s.dependencyLoopErr(tokens);
                 return &.{};
             }
         }
@@ -3128,6 +3133,178 @@ test "declaration order" {
             \\x: int = z:int;
             ,
         },
+        .{
+            .source =
+            \\z := 0;
+            \\x := z;
+            ,
+            .expected =
+            \\z: int = 0;
+            \\x: int = z:int;
+            ,
+        },
+        .{
+            .source =
+            \\x := z;
+            \\z := 0;
+            \\y := z;
+            ,
+            .expected =
+            \\z: int = 0;
+            \\x: int = z:int;
+            \\y: int = z:int;
+            ,
+        },
+        .{
+            .source =
+            \\x := z;
+            \\y := z;
+            \\z := 0;
+            ,
+            .expected =
+            \\z: int = 0;
+            \\x: int = z:int;
+            \\y: int = z:int;
+            ,
+        },
+        .{
+            .source =
+            \\x := z;
+            \\y := x;
+            \\z := 0;
+            ,
+            .expected =
+            \\z: int = 0;
+            \\x: int = z:int;
+            \\y: int = x:int;
+            ,
+        },
+        .{
+            .source =
+            \\x := y;
+            \\y := z;
+            \\z := 0;
+            ,
+            .expected =
+            \\z: int = 0;
+            \\y: int = z:int;
+            \\x: int = y:int;
+            ,
+        },
+        .{
+            .source =
+            \\alpha := 1;
+            \\beta := 2;
+            \\gamma := 3;
+            ,
+            .expected =
+            \\alpha: int = 1;
+            \\beta: int = 2;
+            \\gamma: int = 3;
+            ,
+        },
+        .{
+            .source =
+            \\left := left_base;
+            \\left_base := 1;
+            \\right := right_base;
+            \\right_base := 2;
+            ,
+            .expected =
+            \\left_base: int = 1;
+            \\left: int = left_base:int;
+            \\right_base: int = 2;
+            \\right: int = right_base:int;
+            ,
+        },
+        .{
+            .source =
+            \\total := left + right;
+            \\right := 2;
+            \\left := 1;
+            ,
+            .expected =
+            \\left: int = 1;
+            \\right: int = 2;
+            \\total: int = (left:int + right:int):int;
+            ,
+        },
+        .{
+            .source =
+            \\total := left + right;
+            \\right := root + 2;
+            \\left := root + 1;
+            \\root := 0;
+            ,
+            .expected =
+            \\root: int = 0;
+            \\left: int = (root:int + 1):int;
+            \\right: int = (root:int + 2):int;
+            \\total: int = (left:int + right:int):int;
+            ,
+        },
+        .{
+            .source =
+            \\result := base + base * base;
+            \\base := 2;
+            ,
+            .expected =
+            \\base: int = 2;
+            \\result: int = (base:int + (base:int * base:int):int):int;
+            ,
+        },
+        .{
+            .source =
+            \\result := -float((base));
+            \\base := 1;
+            ,
+            .expected =
+            \\base: int = 1;
+            \\result: float = (-float((base:int):int)):float;
+            ,
+        },
+        .{
+            .source =
+            \\mut converted: float = source;
+            \\source := 1;
+            ,
+            .expected =
+            \\source: int = 1;
+            \\mut converted: float = float(source:int);
+            ,
+        },
+        .{
+            .source =
+            \\result := add(left, right);
+            \\right := 2;
+            \\add := fn (a: int, b: int) int {
+            \\    return a + b;
+            \\}
+            \\left := 1;
+            ,
+            .expected =
+            \\add: function = fn (a: int, b: int) int {
+            \\    return (a:int + b:int):int;
+            \\};
+            \\left: int = 1;
+            \\right: int = 2;
+            \\result: int = add(left:int, right:int):int;
+            ,
+        },
+        .{
+            .source =
+            \\alias := implementation;
+            \\implementation := fn () int {
+            \\    return 1;
+            \\}
+            ,
+            .expected =
+            \\implementation: function = fn () int {
+            \\    return 1;
+            \\};
+            \\alias: function = implementation;
+            ,
+        },
     };
 
     for (tests) |t| {
@@ -3136,6 +3313,114 @@ test "declaration order" {
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "error - dependecy loops" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+        line: u32,
+    } = &.{
+        .{
+            .source = "value := value;",
+            .error_msg = "Dependency loop detected: value -> value",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\left := right;
+            \\right := left;
+            ,
+            .error_msg = "Dependency loop detected: left -> right -> left",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\alpha := beta;
+            \\beta := gamma;
+            \\gamma := alpha;
+            ,
+            .error_msg = "Dependency loop detected: alpha -> beta -> gamma -> alpha",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\entry := first;
+            \\first := cycle_a;
+            \\cycle_a := cycle_b;
+            \\cycle_b := cycle_a;
+            ,
+            .error_msg = "Dependency loop detected: cycle_a -> cycle_b -> cycle_a",
+            .line = 3,
+        },
+        .{
+            .source =
+            \\ready := 1;
+            \\left := right;
+            \\right := left;
+            ,
+            .error_msg = "Dependency loop detected: left -> right -> left",
+            .line = 2,
+        },
+        .{
+            .source =
+            \\left := -float((right));
+            \\right := int(left);
+            ,
+            .error_msg = "Dependency loop detected: left -> right -> left",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\result := identity(loop);
+            \\identity := fn (value: int) int {
+            \\    return value;
+            \\}
+            \\loop := result;
+            ,
+            .error_msg = "Dependency loop detected: result -> loop -> result",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\result := factory();
+            \\factory := result;
+            ,
+            .error_msg = "Dependency loop detected: result -> factory -> result",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\result := stable + loop;
+            \\stable := 1;
+            \\loop := result;
+            ,
+            .error_msg = "Dependency loop detected: result -> loop -> result",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\first := second;
+            \\second := first;
+            \\third := fourth;
+            \\fourth := third;
+            ,
+            .error_msg = "Dependency loop detected: first -> second -> first",
+            .line = 1,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expectEqual(@as(usize, 1), nir.errors.len);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
+        try testing.expectEqual(t.line, nir.errors[0].line);
     }
 }
 
