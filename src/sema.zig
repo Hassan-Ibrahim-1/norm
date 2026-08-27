@@ -28,16 +28,17 @@ const Sema = struct {
 
     analyzing_stmt: AnalyzingStmt,
 
-    // FIX: This is a bad solution, the language allows declaring functions within
-    // functions so this won't work. Having a context is probably the right thing to
-    // do here.
-
-    /// `n_unknown` if in global scope
-    function_type: NormType,
+    fn_ctx: FunctionContext,
 
     const AnalyzingStmt = union(enum) {
         other,
         for_loop,
+    };
+
+    const FunctionContext = struct {
+        // gives the name of the identifier if the function is bound to one.
+        function_identifier: ?Token,
+        return_type: NormType,
     };
 
     fn mask(ty: NormType) u64 {
@@ -79,7 +80,10 @@ const Sema = struct {
             .analyzing_stmt = .other,
             .current_for_block_scope = sym_table.top_scope,
             .panic_mode = false,
-            .function_type = .n_unknown,
+            .fn_ctx = .{
+                .function_identifier = null,
+                .return_type = .n_unknown,
+            },
         };
     }
 
@@ -280,20 +284,29 @@ const Sema = struct {
                 return .{ .expression = .{ .expr = nir_expr } };
             },
             .var_decl => |vd| {
+                const previous_fn_ident = s.fn_ctx.function_identifier;
+                defer s.fn_ctx.function_identifier = previous_fn_ident;
+
+                if (vd.value == null) @panic("todo: zero values");
+
                 const sym = s.sym_table.findOrRegister(vd.ident.lexeme, vd.mutable) orelse {
                     s.redefinedVariableErr(vd.ident);
                     return .invalid;
                 };
 
-                const value =
-                    if (vd.value) |v|
-                        s.expectTypeTryCast(s.expression(v), sym.type)
-                    else
-                        @panic("todo: zero values");
+                if (sym.type == .n_unknown) {
+                    sym.type = s.inferType(vd.value.?);
+                }
 
-                // Why would value ever be null? This should be an error no?
+                if (sym.type == .n_function) {
+                    s.fn_ctx.function_identifier = vd.ident;
+                    s.fn_ctx.function_identifier = vd.ident;
+                }
+
+                const value = s.expectTypeTryCast(s.expression(vd.value.?), sym.type);
+
                 if (value == null) return .invalid;
-                if (sym.type == .n_unknown) sym.type = value.?.type;
+
                 if (sym.type == .n_void) {
                     s.voidAssignErr(vd.ident);
                     return .invalid;
@@ -523,8 +536,8 @@ const Sema = struct {
             .return_stmt => |return_stmt| {
                 const nir_expr = if (return_stmt.expr) |expr| s.expression(expr) else null;
                 const return_type = if (nir_expr) |expr| expr.type else .n_void;
-                if (!tagEql(return_type, s.function_type)) {
-                    s.wrongReturnType(return_type, s.function_type, return_stmt.token);
+                if (!tagEql(return_type, s.fn_ctx.return_type)) {
+                    s.wrongReturnType(return_type, s.fn_ctx.return_type, return_stmt.token);
                     return .invalid;
                 }
                 return .{ .return_stmt = .{ .token = return_stmt.token, .expr = nir_expr } };
@@ -598,7 +611,19 @@ const Sema = struct {
             .grouping => |*g| s.grouping(g),
             .identifier => |*i| s.identifier(i),
             .literal => |*l| s.literal(l),
-            .function => |*f| s.function(f),
+            .function => |*f| b: {
+                const previous_ret = s.fn_ctx.return_type;
+                defer s.fn_ctx.return_type = previous_ret;
+
+                const fn_type = if (s.fn_ctx.function_identifier) |ident| t: {
+                    const sym = s.sym_table.find(ident.lexeme, s.sym_table.current_scope);
+                    break :t sym.type;
+                } else s.inferType(expr);
+
+                s.fn_ctx.return_type = fn_type.n_function.return_type;
+
+                break :b s.function(f, fn_type.n_function);
+            },
             .call => |*c| s.call(c),
         };
     }
@@ -876,38 +901,28 @@ const Sema = struct {
         return makeLiteral(s.arena, .fromAst(l.value), l.token, ty);
     }
 
-    fn function(s: *Sema, f: *Ast.Expr.Function) *Nir.Expr {
-        const previous_fn_type = s.function_type;
-        defer s.function_type = previous_fn_type;
-
+    fn function(s: *Sema, f: *Ast.Expr.Function, inferred_type: *NormType.Function) *Nir.Expr {
         const scope = s.beginScope();
         defer s.endScope();
 
-        const parameters = s.arena.alloc(Nir.Expr.Function.Parameter, f.parameters.len) catch oom();
-        for (f.parameters, 0..) |param, i| {
-            const param_type = s.analyzeTypeExpr(param.type);
-            parameters[i] = .{ .name = param.name, .type = param_type };
-            const already_exists = s.sym_table.register(param.name.lexeme, param_type, false);
+        for (inferred_type.parameters) |param| {
+            const already_exists = s.sym_table.register(param.name.lexeme, param.type, false);
             if (already_exists) {
                 s.redefinedVariableErr(param.name);
                 return s.invalid_expr;
             }
         }
 
-        const return_type =
-            if (f.return_type) |return_type| s.analyzeTypeExpr(return_type) else .n_void;
-        s.function_type = return_type;
-
         const body = s.statement(.{ .block = f.body }).block;
 
-        if (return_type != .n_void) {
+        if (inferred_type.return_type != .n_void) {
             const always_returns = alwaysReturns(body.stmts);
             if (!always_returns) {
-                return s.alwaysReturnsErr(return_type, f.token);
+                return s.alwaysReturnsErr(inferred_type.return_type, f.token);
             }
         }
 
-        return makeFunction(s.arena, f.token, scope, parameters, return_type, body);
+        return makeFunction(s.arena, f.token, scope, body, inferred_type);
     }
 
     fn alwaysReturns(stmts: []Nir.Stmt) bool {
@@ -1094,16 +1109,10 @@ fn makeFunction(
     arena: Allocator,
     fn_token: Token,
     scope: *Nir.Scope,
-    parameters: []Nir.Expr.Function.Parameter,
-    return_type: NormType,
     body: Nir.Stmt.Block,
+    fn_type: *NormType.Function,
 ) *Nir.Expr {
     const e = makeExpr(arena);
-    const ty = arena.create(NormType.Function) catch oom();
-    ty.* = .{
-        .parameters = parameters,
-        .return_type = return_type,
-    };
     e.* = .{
         .kind = .{
             .function = .{
@@ -1112,7 +1121,7 @@ fn makeFunction(
                 .body = body,
             },
         },
-        .type = .{ .n_function = ty },
+        .type = .{ .n_function = fn_type },
     };
     return e;
 }
