@@ -541,10 +541,11 @@ const Sema = struct {
     }
 
     fn expectedTypeExprErr(s: *Sema, expr: *Ast.Expr) NormType {
+        const rendered_expr = debug.printExpr(s.arena, expr);
         s.reportErrorAst(
             expr,
-            "Expected type identifier found {f}. TODO: support struct/enum expressions",
-            .{expr},
+            "Expected type identifier found {s}. TODO: support struct/enum expressions",
+            .{rendered_expr},
         );
         return .n_unknown;
     }
@@ -1210,9 +1211,7 @@ fn testAnalyzeExpr(gpa: Allocator, source: []const u8) ![]const u8 {
         return error.SemaFailed;
     }
 
-    var aw = Io.Writer.Allocating.init(gpa);
-    try nir.stmts[0].expression.expr.format(&aw.writer);
-    return aw.toOwnedSlice();
+    return debug.printExpr(gpa, nir.stmts[0].expression.expr);
 }
 
 fn testAnalyzeExprFailure(gpa: Allocator, source: []const u8) !Nir {
@@ -1234,7 +1233,9 @@ fn testAnalyzeExprFailure(gpa: Allocator, source: []const u8) !Nir {
     var nir = analyze(gpa, &ast);
     errdefer nir.deinit();
     if (nir.errors.len == 0) {
-        std.debug.print("expected an error, sema passed with output=\"{f}\"\n", .{nir.stmts[0].expression.expr});
+        const expr = debug.printExpr(gpa, nir.stmts[0].expression.expr);
+        defer gpa.free(expr);
+        std.debug.print("expected an error, sema passed with output=\"{s}\"\n", .{expr});
         return error.SemaPassed;
     }
     return nir;
@@ -1963,8 +1964,8 @@ test "block scopes" {
             .expected =
             \\{
             \\    {
-            \\    x: int = 1;
-            \\}
+            \\        x: int = 1;
+            \\    }
             \\    x: int = 2;
             \\}
             ,
@@ -1985,11 +1986,11 @@ test "block scopes" {
             \\{
             \\    x: int = 1;
             \\    {
-            \\    y: int = 2;
-            \\    {
-            \\    z: int = (x:int + y:int):int;
-            \\}
-            \\}
+            \\        y: int = 2;
+            \\        {
+            \\            z: int = (x:int + y:int):int;
+            \\        }
+            \\    }
             \\}
             ,
         },
@@ -2008,8 +2009,8 @@ test "block scopes" {
             \\{
             \\    y: int = (x:int * 2):int;
             \\    {
-            \\    z: int = (y:int + x:int):int;
-            \\}
+            \\        z: int = (y:int + x:int):int;
+            \\    }
             \\}
             ,
         },
@@ -2027,9 +2028,9 @@ test "block scopes" {
             \\{
             \\    a: int = 1;
             \\    {
-            \\    b: int = (a:int + 1):int;
-            \\    c: int = (a:int + b:int):int;
-            \\}
+            \\        b: int = (a:int + 1):int;
+            \\        c: int = (a:int + b:int):int;
+            \\    }
             \\}
             ,
         },
@@ -2275,8 +2276,8 @@ test "if statements" {
             \\y: int = 2;
             \\if (x:int > 0):bool {
             \\    if (y:int > 0):bool {
-            \\    z: int = 1;
-            \\}
+            \\        z: int = 1;
+            \\    }
             \\}
             ,
         },
@@ -2437,8 +2438,8 @@ test "variable assignment" {
             \\{
             \\    mut x: int = 10;
             \\    {
-            \\    x = 5;
-            \\}
+            \\        x = 5;
+            \\    }
             \\}
             ,
         },
@@ -2455,8 +2456,8 @@ test "variable assignment" {
             \\{
             \\    mut x: int = 10;
             \\    if true {
-            \\    x = 5;
-            \\}
+            \\        x = 5;
+            \\    }
             \\}
             ,
         },
@@ -2475,10 +2476,10 @@ test "variable assignment" {
             \\{
             \\    mut x: int = 10;
             \\    if false {
-            \\    x = 5;
-            \\} else {
-            \\    x = 3;
-            \\}
+            \\        x = 5;
+            \\    } else {
+            \\        x = 3;
+            \\    }
             \\}
             ,
         },
@@ -2497,10 +2498,10 @@ test "variable assignment" {
             \\{
             \\    mut x: int = 10;
             \\    if false {
-            \\    x = 5;
-            \\} else if true {
-            \\    x = 3;
-            \\}
+            \\        x = 5;
+            \\    } else if true {
+            \\        x = 3;
+            \\    }
             \\}
             ,
         },
@@ -2521,12 +2522,12 @@ test "variable assignment" {
             \\{
             \\    mut x: int = 10;
             \\    if false {
-            \\    x = 5;
-            \\} else if false {
-            \\    x = 3;
-            \\} else {
-            \\    x = 7;
-            \\}
+            \\        x = 5;
+            \\    } else if false {
+            \\        x = 3;
+            \\    } else {
+            \\        x = 7;
+            \\    }
             \\}
             ,
         },
@@ -2544,9 +2545,9 @@ test "variable assignment" {
             \\{
             \\    mut x: int = 10;
             \\    {
-            \\    mut y: int = 5;
-            \\    x = y:int;
-            \\}
+            \\        mut y: int = 5;
+            \\        x = y:int;
+            \\    }
             \\}
             ,
         },
@@ -2645,8 +2646,8 @@ test "variable assignment" {
             \\    mut x: int = 10;
             \\    mut y: int = 5;
             \\    if (x:int > y:int):bool {
-            \\    x = y:int;
-            \\}
+            \\        x = y:int;
+            \\    }
             \\}
             ,
         },
@@ -2666,11 +2667,11 @@ test "variable assignment" {
             \\{
             \\    mut x: int = 10;
             \\    if true {
-            \\    mut y: int = 5;
-            \\    x = y:int;
-            \\} else {
-            \\    x = 3;
-            \\}
+            \\        mut y: int = 5;
+            \\        x = y:int;
+            \\    } else {
+            \\        x = 3;
+            \\    }
             \\}
             ,
         },
@@ -2965,8 +2966,8 @@ test "loop jump statements" {
             .expected =
             \\for mut i: int = 0; (i:int < 3):bool; i = (i:int + 1):int; {
             \\    if true {
-            \\    break;
-            \\}
+            \\        break;
+            \\    }
             \\}
             ,
         },
@@ -2981,8 +2982,8 @@ test "loop jump statements" {
             .expected =
             \\for {
             \\    for {
-            \\    continue;
-            \\}
+            \\        continue;
+            \\    }
             \\}
             ,
         },
@@ -2998,8 +2999,8 @@ test "loop jump statements" {
             .expected =
             \\for {
             \\    for {
-            \\    continue;
-            \\}
+            \\        continue;
+            \\    }
             \\    break;
             \\}
             ,

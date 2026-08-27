@@ -222,10 +222,6 @@ pub const NormType = union(enum) {
 pub const Stmt = union(enum) {
     pub const Expression = struct {
         expr: *Expr,
-
-        pub fn format(e: *const Stmt.Expression, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{f};", .{e.expr});
-        }
     };
 
     pub const VarDecl = struct {
@@ -235,20 +231,11 @@ pub const Stmt = union(enum) {
         value: *Expr,
         // I don't think this field is necessary, I just use it for formatting and that's it.
         mutable: bool,
-
-        pub fn format(vd: *const Stmt.VarDecl, w: *Io.Writer) Io.Writer.Error!void {
-            const mut = if (vd.mutable) "mut " else "";
-            try w.print("{s}{s}: {f} = {f};", .{ mut, vd.ident.lexeme, vd.type, vd.value });
-        }
     };
 
     pub const VarAssign = struct {
         ident: Token,
         value: *Expr,
-
-        pub fn format(va: *const Stmt.VarAssign, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{s} = {f};", .{ va.ident.lexeme, va.value });
-        }
     };
 
     pub const Block = struct {
@@ -256,23 +243,11 @@ pub const Stmt = union(enum) {
         end_token: Token, // }
         stmts: []Stmt,
         scope: *Scope,
-
-        pub fn format(b: *const Stmt.Block, w: *Io.Writer) Io.Writer.Error!void {
-            try w.writeAll("{\n");
-            for (b.stmts) |stmt| {
-                try w.print("    {f}\n", .{stmt});
-            }
-            try w.writeAll("}");
-        }
     };
 
     pub const Print = struct {
         token: Token,
         expr: *Expr,
-
-        pub fn format(p: *const Stmt.Print, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("print({f});", .{p.expr});
-        }
     };
 
     pub const If = struct {
@@ -287,16 +262,6 @@ pub const Stmt = union(enum) {
         then_block: Block,
         else_if_blocks: []ElseIf,
         else_block: ?Block,
-
-        pub fn format(i: *const If, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("if {f} {f}", .{ i.condition, i.then_block });
-            for (i.else_if_blocks) |else_if| {
-                try w.print(" else if {f} {f}", .{ else_if.condition, else_if.then_block });
-            }
-            if (i.else_block) |else_block| {
-                try w.print(" else {f}", .{else_block});
-            }
-        }
     };
 
     pub const For = struct {
@@ -304,23 +269,11 @@ pub const Stmt = union(enum) {
             var_decl: VarDecl,
             var_assign: VarAssign,
             expr: Expression,
-
-            pub fn format(i: *const InitializerStmt, w: *Io.Writer) Io.Writer.Error!void {
-                switch (i.*) {
-                    inline else => |s| try s.format(w),
-                }
-            }
         };
 
         pub const IncrementStmt = union(enum) {
             var_assign: VarAssign,
             expr: Expression,
-
-            pub fn format(i: *const IncrementStmt, w: *Io.Writer) Io.Writer.Error!void {
-                switch (i.*) {
-                    inline else => |s| try s.format(w),
-                }
-            }
         };
 
         token: Token, // for
@@ -332,18 +285,6 @@ pub const Stmt = union(enum) {
         increment: ?IncrementStmt,
 
         block: Block,
-
-        pub fn format(f: *const For, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("for ", .{});
-            if (f.initializer) |init| {
-                try w.print("{f} ", .{init});
-            }
-            try w.print("{f}; ", .{f.condition});
-            if (f.increment) |incr| {
-                try w.print("{f} ", .{incr});
-            }
-            try w.print("{f}", .{f.block});
-        }
     };
 
     pub const ConditionFor = struct {
@@ -351,51 +292,27 @@ pub const Stmt = union(enum) {
         scope: *Scope,
         condition: *Expr,
         block: Block,
-
-        pub fn format(f: *const ConditionFor, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("for {f} {f}", .{ f.condition, f.block });
-        }
     };
 
     pub const InfiniteFor = struct {
         token: Token, // for
         scope: *Scope,
         block: Block,
-
-        pub fn format(f: *const InfiniteFor, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("for {f}", .{f.block});
-        }
     };
 
     pub const Break = struct {
         token: Token,
         jump_scope: *Scope,
-
-        pub fn format(_: *const Break, w: *Io.Writer) Io.Writer.Error!void {
-            try w.writeAll("break;");
-        }
     };
 
     pub const Continue = struct {
         token: Token,
         jump_scope: *Scope,
-
-        pub fn format(_: *const Continue, w: *Io.Writer) Io.Writer.Error!void {
-            try w.writeAll("continue;");
-        }
     };
 
     pub const Return = struct {
         token: Token, // return
         expr: ?*Expr,
-
-        pub fn format(r: *const Return, w: *Io.Writer) Io.Writer.Error!void {
-            if (r.expr) |expr| {
-                try w.print("return {f};", .{expr});
-            } else {
-                try w.writeAll("return;");
-            }
-        }
     };
 
     pub const invalid: Stmt = undefined;
@@ -412,12 +329,6 @@ pub const Stmt = union(enum) {
     continue_stmt: Continue,
     return_stmt: Return,
     print: Print,
-
-    pub fn format(stmt: Stmt, w: *Io.Writer) Io.Writer.Error!void {
-        switch (stmt) {
-            inline else => |s| try w.print("{f}", .{s}),
-        }
-    }
 };
 
 pub const Expr = struct {
@@ -425,33 +336,16 @@ pub const Expr = struct {
         left: *Expr,
         operator: Token,
         right: *Expr,
-
-        pub fn format(expr: *const Binary, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("({f} {s} {f})", .{ expr.left, expr.operator.lexeme, expr.right });
-        }
     };
 
     pub const Unary = struct {
         operator: Token,
         expr: *Expr,
-
-        pub fn format(expr: *const Unary, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("({s}{f})", .{ expr.operator.lexeme, expr.expr });
-        }
     };
 
     pub const Cast = struct {
         token: Token,
         expr: *Expr,
-
-        pub fn format(expr: *const Cast, w: *Io.Writer) Io.Writer.Error!void {
-            const target = switch (expr.token.type) {
-                .kw_float => "float",
-                .kw_int => "int",
-                else => unreachable,
-            };
-            try w.print("{s}({f})", .{ target, expr.expr });
-        }
     };
 
     pub const Literal = struct {
@@ -461,16 +355,6 @@ pub const Expr = struct {
             string: []const u8,
             boolean: bool,
             nil: void,
-
-            pub fn format(value: *const Value, w: *Io.Writer) Io.Writer.Error!void {
-                try switch (value.*) {
-                    .integer => |i| w.print("{}", .{i}),
-                    .float => |i| w.print("{d:.3}", .{i}),
-                    .string => |i| w.print("{s}", .{i}),
-                    .boolean => |i| w.print("{}", .{i}),
-                    .nil => w.print("nil", .{}),
-                };
-            }
 
             pub fn fromAst(ast_val: Ast.Expr.Literal.Value) Value {
                 return switch (ast_val) {
@@ -485,31 +369,16 @@ pub const Expr = struct {
 
         value: Value,
         token: Token,
-
-        pub fn format(expr: *const Literal, w: *Io.Writer) Io.Writer.Error!void {
-            try switch (expr.value) {
-                .string => |s| w.print("\"{s}\"", .{s}),
-                else => w.print("{f}", .{expr.value}),
-            };
-        }
     };
 
     pub const Grouping = struct {
         paren: Token,
         expr: *Expr,
-
-        pub fn format(expr: *const Grouping, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("({f})", .{expr.expr});
-        }
     };
 
     pub const Identifier = struct {
         ident: Token,
         scope: *Scope,
-
-        pub fn format(i: *const Identifier, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{s}", .{i.ident.lexeme});
-        }
     };
 
     pub const Function = struct {
@@ -521,43 +390,12 @@ pub const Expr = struct {
             name: Token,
             type: NormType,
         };
-
-        pub fn format(f: *const Function, ty: *const NormType.Function, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("fn (", .{});
-            for (ty.parameters, 0..) |param, i| {
-                if (i == ty.parameters.len - 1) {
-                    try w.print("{s}: {f}", .{ param.name.lexeme, param.type });
-                } else {
-                    try w.print("{s}: {f}, ", .{ param.name.lexeme, param.type });
-                }
-            }
-
-            try w.print(") ", .{});
-
-            if (ty.return_type != .n_void) {
-                try w.print("{f} ", .{ty.return_type});
-            }
-
-            try w.print("{f}", .{f.body});
-        }
     };
 
     pub const Call = struct {
         token: Token, // left_paren
         callee: *Expr,
         args: []*Expr,
-
-        pub fn format(c: *const Call, w: *Io.Writer) Io.Writer.Error!void {
-            try w.print("{f}(", .{c.callee});
-            for (c.args, 0..) |arg, i| {
-                if (i == c.args.len - 1) {
-                    try w.print("{f}", .{arg});
-                } else {
-                    try w.print("{f}, ", .{arg});
-                }
-            }
-            try w.print(")", .{});
-        }
     };
 
     type: NormType,
@@ -587,25 +425,6 @@ pub const Expr = struct {
             .grouping => |*g| g.paren,
             .function => |*f| f.token,
             .call => |*c| c.token,
-        };
-    }
-
-    pub fn format(expr: *const Expr, w: *Io.Writer) Io.Writer.Error!void {
-        if (expr.type == .n_unknown) {
-            @panic("found invalid type - an error was not reported in sema");
-        }
-
-        try switch (expr.kind) {
-            .function => |f| f.format(expr.type.n_function, w),
-            .identifier => |*i| {
-                if (expr.type == .n_function) {
-                    try w.print("{f}", .{i});
-                } else {
-                    try w.print("{f}:{f}", .{ i, expr.type });
-                }
-            },
-            inline .cast, .literal => |l| w.print("{f}", .{l}),
-            inline else => |b| w.print("{f}:{f}", .{ b, expr.type }),
         };
     }
 };

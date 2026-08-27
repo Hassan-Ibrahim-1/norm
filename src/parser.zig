@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const mem = std.mem;
 const Allocator = mem.Allocator;
-const Io = std.Io;
 const testing = std.testing;
 const assert = std.debug.assert;
 
@@ -855,10 +854,7 @@ fn testParse(gpa: Allocator, source: []const u8) ![]const u8 {
     }
 
     const expr = ast.stmts[0].expression.expr;
-    var aw = Io.Writer.Allocating.init(gpa);
-    try expr.format(&aw.writer);
-
-    return aw.toOwnedSlice();
+    return debug.printExpr(gpa, expr);
 }
 
 fn testParseStmts(gpa: Allocator, source: []const u8) ![]const u8 {
@@ -1422,8 +1418,8 @@ test "if statements" {
             .expected =
             \\if (x > 0) {
             \\    if (y > 0) {
-            \\    x := 1;
-            \\}
+            \\        x := 1;
+            \\    }
             \\}
             ,
         },
@@ -1800,8 +1796,8 @@ test "loop control stmts" {
             .expected =
             \\for mut i := 0; (i < 3); i = (i + 1); {
             \\    if true {
-            \\    break;
-            \\}
+            \\        break;
+            \\    }
             \\}
             ,
         },
@@ -1816,8 +1812,8 @@ test "loop control stmts" {
             .expected =
             \\for {
             \\    for {
-            \\    continue;
-            \\}
+            \\        continue;
+            \\    }
             \\}
             ,
         },
@@ -1833,8 +1829,8 @@ test "loop control stmts" {
             .expected =
             \\for {
             \\    for {
-            \\    continue;
-            \\}
+            \\        continue;
+            \\    }
             \\    break;
             \\}
             ,
@@ -1885,6 +1881,26 @@ test "functions" {
             .expected =
             \\fn (x: int, y: float) float {
             \\    print((x + y));
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\outer := fn () {
+            \\    inner := fn () {
+            \\        if true {
+            \\            print("ok");
+            \\        }
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\outer := fn () {
+            \\    inner := fn () {
+            \\        if true {
+            \\            print("ok");
+            \\        }
+            \\    };
             \\};
             ,
         },

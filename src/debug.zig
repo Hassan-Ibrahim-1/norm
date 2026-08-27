@@ -2,6 +2,7 @@ const std = @import("std");
 
 const compiler = @import("compiler.zig");
 const Ast = @import("Ast.zig");
+const Nir = @import("Nir.zig");
 const Chunk = compiler.Chunk;
 const OpCode = compiler.OpCode;
 const Value = @import("value.zig").Value;
@@ -416,17 +417,317 @@ const Allocator = mem.Allocator;
 
 pub fn printStmts(gpa: Allocator, stmts: anytype) []u8 {
     var aw: Io.Writer.Allocating = .init(gpa);
+    var renderer: SourceRenderer = .{ .w = &aw.writer };
+    renderer.writeStmts(stmts) catch @panic("whoops");
+    return aw.toOwnedSlice() catch oom();
+}
 
-    for (stmts, 0..) |stmt, i| {
-        if (i == stmts.len - 1) {
-            aw.writer.print("{f}", .{stmt}) catch @panic("whoops");
-        } else {
-            aw.writer.print("{f}\n", .{stmt}) catch @panic("whoops");
+pub fn printExpr(gpa: Allocator, expr: anytype) []u8 {
+    var aw: Io.Writer.Allocating = .init(gpa);
+    var renderer: SourceRenderer = .{ .w = &aw.writer };
+    renderer.writeExpr(expr) catch @panic("whoops");
+    return aw.toOwnedSlice() catch oom();
+}
+
+const SourceRenderer = struct {
+    w: *Io.Writer,
+    indent: usize = 0,
+
+    fn writeStmts(r: *SourceRenderer, stmts: anytype) Io.Writer.Error!void {
+        for (stmts, 0..) |stmt, i| {
+            if (i > 0) try r.w.writeByte('\n');
+            try r.writeIndent();
+            try r.writeStmt(stmt);
         }
     }
 
-    return aw.toOwnedSlice() catch oom();
-}
+    fn writeStmt(r: *SourceRenderer, stmt: anytype) Io.Writer.Error!void {
+        switch (stmt) {
+            .expression => |s| try r.writeExpressionStmt(s),
+            .var_decl => |s| try r.writeVarDecl(s),
+            .var_assign => |s| try r.writeVarAssign(s),
+            .block => |s| try r.writeBlock(s),
+            .if_stmt => |s| try r.writeIf(s),
+            .for_stmt => |s| try r.writeFor(s),
+            .condition_for => |s| try r.writeConditionFor(s),
+            .infinite_for => |s| try r.writeInfiniteFor(s),
+            .break_stmt => try r.w.writeAll("break;"),
+            .continue_stmt => try r.w.writeAll("continue;"),
+            .return_stmt => |s| try r.writeReturn(s),
+            .print => |s| try r.writePrint(s),
+        }
+    }
+
+    fn writeExpressionStmt(r: *SourceRenderer, stmt: anytype) Io.Writer.Error!void {
+        try r.writeExpr(stmt.expr);
+        try r.w.writeByte(';');
+    }
+
+    fn writeVarDecl(r: *SourceRenderer, decl: anytype) Io.Writer.Error!void {
+        const mutable = if (decl.mutable) "mut " else "";
+        switch (@TypeOf(decl)) {
+            Ast.Stmt.VarDecl => {
+                if (decl.type_expr != null and decl.value != null) {
+                    try r.w.print("{s}{s}: ", .{ mutable, decl.ident.lexeme });
+                    try r.writeAstExpr(decl.type_expr.?);
+                    try r.w.writeAll(" = ");
+                    try r.writeAstExpr(decl.value.?);
+                    try r.w.writeByte(';');
+                } else if (decl.type_expr) |type_expr| {
+                    try r.w.print("{s}{s}: ", .{ mutable, decl.ident.lexeme });
+                    try r.writeAstExpr(type_expr);
+                    try r.w.writeByte(';');
+                } else {
+                    try r.w.print("{s}{s} := ", .{ mutable, decl.ident.lexeme });
+                    try r.writeAstExpr(decl.value.?);
+                    try r.w.writeByte(';');
+                }
+            },
+            Nir.Stmt.VarDecl => {
+                try r.w.print("{s}{s}: {f} = ", .{ mutable, decl.ident.lexeme, decl.type });
+                try r.writeNirExpr(decl.value);
+                try r.w.writeByte(';');
+            },
+            else => @compileError("unsupported variable declaration type"),
+        }
+    }
+
+    fn writeVarAssign(r: *SourceRenderer, assign: anytype) Io.Writer.Error!void {
+        try r.w.print("{s} = ", .{assign.ident.lexeme});
+        try r.writeExpr(assign.value);
+        try r.w.writeByte(';');
+    }
+
+    fn writeBlock(r: *SourceRenderer, block: anytype) Io.Writer.Error!void {
+        try r.w.writeAll("{\n");
+        r.indent += 1;
+        for (block.stmts) |stmt| {
+            try r.writeIndent();
+            try r.writeStmt(stmt);
+            try r.w.writeByte('\n');
+        }
+        r.indent -= 1;
+        try r.writeIndent();
+        try r.w.writeByte('}');
+    }
+
+    fn writeIf(r: *SourceRenderer, if_stmt: anytype) Io.Writer.Error!void {
+        try r.w.writeAll("if ");
+        try r.writeExpr(if_stmt.condition);
+        try r.w.writeByte(' ');
+        try r.writeBlock(if_stmt.then_block);
+
+        for (if_stmt.else_if_blocks) |else_if| {
+            try r.w.writeAll(" else if ");
+            try r.writeExpr(else_if.condition);
+            try r.w.writeByte(' ');
+            try r.writeBlock(else_if.then_block);
+        }
+        if (if_stmt.else_block) |else_block| {
+            try r.w.writeAll(" else ");
+            try r.writeBlock(else_block);
+        }
+    }
+
+    fn writeForPart(r: *SourceRenderer, part: anytype) Io.Writer.Error!void {
+        switch (part) {
+            inline else => |stmt| switch (@TypeOf(stmt)) {
+                Ast.Stmt.Expression, Nir.Stmt.Expression => try r.writeExpressionStmt(stmt),
+                Ast.Stmt.VarDecl, Nir.Stmt.VarDecl => try r.writeVarDecl(stmt),
+                Ast.Stmt.VarAssign, Nir.Stmt.VarAssign => try r.writeVarAssign(stmt),
+                else => @compileError("unsupported for statement part"),
+            },
+        }
+    }
+
+    fn writeFor(r: *SourceRenderer, for_stmt: anytype) Io.Writer.Error!void {
+        try r.w.writeAll("for ");
+        if (for_stmt.initializer) |initializer| {
+            try r.writeForPart(initializer);
+            try r.w.writeByte(' ');
+        }
+        try r.writeExpr(for_stmt.condition);
+        try r.w.writeAll("; ");
+        if (for_stmt.increment) |increment| {
+            try r.writeForPart(increment);
+            try r.w.writeByte(' ');
+        }
+        try r.writeBlock(for_stmt.block);
+    }
+
+    fn writeConditionFor(r: *SourceRenderer, for_stmt: anytype) Io.Writer.Error!void {
+        try r.w.writeAll("for ");
+        try r.writeExpr(for_stmt.condition);
+        try r.w.writeByte(' ');
+        try r.writeBlock(for_stmt.block);
+    }
+
+    fn writeInfiniteFor(r: *SourceRenderer, for_stmt: anytype) Io.Writer.Error!void {
+        try r.w.writeAll("for ");
+        try r.writeBlock(for_stmt.block);
+    }
+
+    fn writeReturn(r: *SourceRenderer, return_stmt: anytype) Io.Writer.Error!void {
+        if (return_stmt.expr) |expr| {
+            try r.w.writeAll("return ");
+            try r.writeExpr(expr);
+            try r.w.writeByte(';');
+        } else {
+            try r.w.writeAll("return;");
+        }
+    }
+
+    fn writePrint(r: *SourceRenderer, print_stmt: anytype) Io.Writer.Error!void {
+        try r.w.writeAll("print(");
+        try r.writeExpr(print_stmt.expr);
+        try r.w.writeAll(");");
+    }
+
+    fn writeExpr(r: *SourceRenderer, expr: anytype) Io.Writer.Error!void {
+        switch (@TypeOf(expr.*)) {
+            Ast.Expr => try r.writeAstExpr(expr),
+            Nir.Expr => try r.writeNirExpr(expr),
+            else => @compileError("unsupported expression type"),
+        }
+    }
+
+    fn writeAstExpr(r: *SourceRenderer, expr: *const Ast.Expr) Io.Writer.Error!void {
+        switch (expr.*) {
+            .binary => |binary| {
+                try r.w.writeByte('(');
+                try r.writeAstExpr(binary.left);
+                try r.w.print(" {s} ", .{binary.operator.lexeme});
+                try r.writeAstExpr(binary.right);
+                try r.w.writeByte(')');
+            },
+            .unary => |unary| {
+                try r.w.print("({s}", .{unary.operator.lexeme});
+                try r.writeAstExpr(unary.expr);
+                try r.w.writeByte(')');
+            },
+            .cast => |cast| {
+                try r.w.print("{s}(", .{castName(cast.token)});
+                try r.writeAstExpr(cast.expr);
+                try r.w.writeByte(')');
+            },
+            .grouping => |grouping| try r.writeAstExpr(grouping.expr),
+            .literal => |literal| try r.writeLiteral(literal.value),
+            .identifier => |identifier| try r.w.writeAll(identifier.ident.lexeme),
+            .function => |function| try r.writeAstFunction(function),
+            .call => |call| try r.writeAstCall(call),
+        }
+    }
+
+    fn writeAstFunction(r: *SourceRenderer, function: Ast.Expr.Function) Io.Writer.Error!void {
+        try r.w.writeAll("fn (");
+        for (function.parameters, 0..) |parameter, i| {
+            if (i > 0) try r.w.writeAll(", ");
+            try r.w.print("{s}: ", .{parameter.name.lexeme});
+            try r.writeAstExpr(parameter.type);
+        }
+        try r.w.writeAll(") ");
+        if (function.return_type) |return_type| {
+            try r.writeAstExpr(return_type);
+            try r.w.writeByte(' ');
+        }
+        try r.writeBlock(function.body);
+    }
+
+    fn writeAstCall(r: *SourceRenderer, call: Ast.Expr.Call) Io.Writer.Error!void {
+        try r.writeAstExpr(call.callee);
+        try r.w.writeByte('(');
+        for (call.args, 0..) |arg, i| {
+            if (i > 0) try r.w.writeAll(", ");
+            try r.writeAstExpr(arg);
+        }
+        try r.w.writeByte(')');
+    }
+
+    fn writeNirExpr(r: *SourceRenderer, expr: *const Nir.Expr) Io.Writer.Error!void {
+        if (expr.type == .n_unknown) {
+            @panic("found invalid type - an error was not reported in sema");
+        }
+
+        switch (expr.kind) {
+            .function => |function| try r.writeNirFunction(function, expr.type.n_function),
+            .identifier => |identifier| {
+                try r.w.writeAll(identifier.ident.lexeme);
+                if (expr.type != .n_function) try r.w.print(":{f}", .{expr.type});
+            },
+            .cast => |cast| {
+                try r.w.print("{s}(", .{castName(cast.token)});
+                try r.writeNirExpr(cast.expr);
+                try r.w.writeByte(')');
+            },
+            .literal => |literal| try r.writeLiteral(literal.value),
+            .binary => |binary| {
+                try r.w.writeByte('(');
+                try r.writeNirExpr(binary.left);
+                try r.w.print(" {s} ", .{binary.operator.lexeme});
+                try r.writeNirExpr(binary.right);
+                try r.w.print("):{f}", .{expr.type});
+            },
+            .unary => |unary| {
+                try r.w.print("({s}", .{unary.operator.lexeme});
+                try r.writeNirExpr(unary.expr);
+                try r.w.print("):{f}", .{expr.type});
+            },
+            .grouping => |grouping| {
+                try r.w.writeByte('(');
+                try r.writeNirExpr(grouping.expr);
+                try r.w.print("):{f}", .{expr.type});
+            },
+            .call => |call| {
+                try r.writeNirExpr(call.callee);
+                try r.w.writeByte('(');
+                for (call.args, 0..) |arg, i| {
+                    if (i > 0) try r.w.writeAll(", ");
+                    try r.writeNirExpr(arg);
+                }
+                try r.w.print("):{f}", .{expr.type});
+            },
+        }
+    }
+
+    fn writeNirFunction(
+        r: *SourceRenderer,
+        function: Nir.Expr.Function,
+        function_type: *const Nir.NormType.Function,
+    ) Io.Writer.Error!void {
+        try r.w.writeAll("fn (");
+        for (function_type.parameters, 0..) |parameter, i| {
+            if (i > 0) try r.w.writeAll(", ");
+            try r.w.print("{s}: {f}", .{ parameter.name.lexeme, parameter.type });
+        }
+        try r.w.writeAll(") ");
+        if (function_type.return_type != .n_void) {
+            try r.w.print("{f} ", .{function_type.return_type});
+        }
+        try r.writeBlock(function.body);
+    }
+
+    fn writeLiteral(r: *SourceRenderer, value: anytype) Io.Writer.Error!void {
+        switch (value) {
+            .integer => |integer| try r.w.print("{}", .{integer}),
+            .float => |float| try r.w.print("{d:.3}", .{float}),
+            .string => |string| try r.w.print("\"{s}\"", .{string}),
+            .boolean => |boolean| try r.w.print("{}", .{boolean}),
+            .nil => try r.w.writeAll("nil"),
+        }
+    }
+
+    fn writeIndent(r: *SourceRenderer) Io.Writer.Error!void {
+        try r.w.splatByteAll(' ', r.indent * 4);
+    }
+
+    fn castName(token: anytype) []const u8 {
+        return switch (token.type) {
+            .kw_float => "float",
+            .kw_int => "int",
+            else => unreachable,
+        };
+    }
+};
 
 pub fn oom() noreturn {
     @panic("oom");

@@ -5,7 +5,13 @@ x := fn () int {
         }
 
         print(some_string());
-        print(add(2,y));
+        if y >= 3 {
+            print(add(2,y));
+        } else if y <= 0 {
+            print(y);
+        } else {
+            print(y+3);
+        }
     }
 
     add_2(3);
