@@ -105,34 +105,15 @@ const Sema = struct {
         s.reportErrorLine(token.line, "Cannot call functions at compile time", .{});
     }
 
-    fn analyzeFunctionSignature(s: *Sema, f: *Ast.Expr.Function) NormType {
-        const parameters = s.arena.alloc(Nir.Expr.Function.Parameter, f.parameters.len) catch oom();
-        for (f.parameters, 0..) |param, i| {
-            const param_type = s.analyzeTypeExpr(param.type);
-            parameters[i] = .{ .name = param.name, .type = param_type };
-        }
-
-        const return_type =
-            if (f.return_type) |return_type| s.analyzeTypeExpr(return_type) else .n_void;
-
-        const ty = s.arena.create(NormType.Function) catch oom();
-        ty.* = .{
-            .parameters = parameters,
-            .return_type = return_type,
-        };
-        return ty;
-    }
-
     fn analyzeGlobalSymbols(s: *Sema, stmts: []Ast.Stmt, nir_stmts: *std.ArrayList(Nir.Stmt)) void {
+        _ = nir_stmts; // autofix
         var decl_list: std.ArrayList(Ast.Stmt.VarDecl) = .empty;
         defer decl_list.deinit(s.scratch);
         for (stmts) |stmt| {
             if (stmt != .var_decl) continue;
             const vd = stmt.var_decl;
 
-            // We can assert that vd.value is not null because the parser disallows those cases.
-            const nir_type = if (vd.type_expr) |t| s.analyzeTypeExpr(t) else s.inferType(vd.value.?);
-            const already_exists = s.sym_table.register(vd.ident.lexeme, nir_type, vd.mutable);
+            const already_exists = s.sym_table.register(vd.ident.lexeme, .n_unknown, vd.mutable);
             if (already_exists) {
                 s.redefinedVariableErr(vd.ident);
             } else {
@@ -144,13 +125,8 @@ const Sema = struct {
         defer s.scratch.free(ordered_decls);
 
         for (ordered_decls) |decl| {
-            for (decl_list.items) |decl_stmt| {
-                if (mem.eql(u8, decl.lexeme, decl_stmt.ident.lexeme)) {
-                    const nir_stmt = s.statement(.{ .var_decl = decl_stmt });
-                    nir_stmts.append(s.arena, nir_stmt) catch oom();
-                    break;
-                }
-            }
+            _ = decl; // autofix
+            // TODO: sort
         }
     }
 
@@ -3101,24 +3077,51 @@ test "functions, calls, and return stmts" {
             \\};
             ,
         },
-        // .{
-        //     .source =
-        //     \\x := fn () int {
-        //     \\    return add(2,3);
-        //     \\}
-        //     \\add := fn (a: int, b: int) int {
-        //     \\    return a + b;
-        //     \\}
-        //     ,
-        //     .expected =
-        //     \\x: function = fn () int {
-        //     \\    return add(2, 3):int;
-        //     \\};
-        //     \\add: function = fn (a: int, b: int) int {
-        //     \\    return (a:int + b:int):int;
-        //     \\};
-        //     ,
-        // },
+        .{
+            .source =
+            \\x := fn () int {
+            \\    return add(2,3);
+            \\}
+            \\add := fn (a: int, b: int) int {
+            \\    return a + b;
+            \\}
+            ,
+            .expected =
+            \\x: function = fn () int {
+            \\    return add(2, 3):int;
+            \\};
+            \\add: function = fn (a: int, b: int) int {
+            \\    return (a:int + b:int):int;
+            \\};
+            ,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        const actual = try testAnalyze(gpa, t.source);
+        defer gpa.free(actual);
+        try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "declaration order" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        expected: []const u8,
+    } = &.{
+        .{
+            .source =
+            \\x := z;
+            \\z := 0;
+            ,
+            .expected =
+            \\z: int = 0;
+            \\x: int = z:int;
+            ,
+        },
     };
 
     for (tests) |t| {
