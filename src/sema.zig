@@ -103,7 +103,7 @@ const Sema = struct {
     }
 
     fn globalCallError(s: *Sema, token: Token) void {
-        s.reportErrorLine(token.line, "Cannot call functions at compile time", .{});
+        s.reportErrorLine(token.line, "Cannot call functions in global scope", .{});
     }
 
     fn analyzeGlobalSymbols(s: *Sema, stmts: []Ast.Stmt, nir_stmts: *std.ArrayList(Nir.Stmt)) void {
@@ -934,6 +934,11 @@ const Sema = struct {
     }
 
     fn call(s: *Sema, c: *Ast.Expr.Call) *Nir.Expr {
+        if (s.sym_table.current_scope.level == .top) {
+            s.globalCallError(c.token);
+            return s.invalid_expr;
+        }
+
         const callee = s.expression(c.callee);
         if (callee.type != .n_function) {
             s.expectedFunctionCallee(callee.type, c.token);
@@ -3063,13 +3068,17 @@ test "functions, calls, and return stmts" {
             \\add := fn (a: int, b: int) int {
             \\    return a + b;
             \\}
-            \\x := add(2, 3);
+            \\{
+            \\    x := add(2, 3);
+            \\}
             ,
             .expected =
             \\add: function = fn (a: int, b: int) int {
             \\    return (a:int + b:int):int;
             \\};
-            \\x: int = add(2, 3):int;
+            \\{
+            \\    x: int = add(2, 3):int;
+            \\}
             ,
         },
         .{
@@ -3277,20 +3286,24 @@ test "declaration order" {
         },
         .{
             .source =
-            \\result := add(left, right);
             \\right := 2;
             \\add := fn (a: int, b: int) int {
             \\    return a + b;
             \\}
             \\left := 1;
+            \\{
+            \\    result := add(left, right);
+            \\}
             ,
             .expected =
+            \\right: int = 2;
             \\add: function = fn (a: int, b: int) int {
             \\    return (a:int + b:int):int;
             \\};
             \\left: int = 1;
-            \\right: int = 2;
-            \\result: int = add(left:int, right:int):int;
+            \\{
+            \\    result: int = add(left:int, right:int):int;
+            \\}
             ,
         },
         .{
@@ -3410,6 +3423,35 @@ test "error - dependecy loops" {
             \\fourth := third;
             ,
             .error_msg = "Dependency loop detected: first -> second -> first",
+            .line = 1,
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expectEqual(@as(usize, 1), nir.errors.len);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
+        try testing.expectEqual(t.line, nir.errors[0].line);
+    }
+}
+
+test "error - global function call" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+        line: u32,
+    } = &.{
+        .{
+            .source =
+            \\x := add(2,3);
+            \\add := fn (a:int,b:int) int { return a + b; }
+            ,
+            .error_msg = "Cannot call functions in global scope",
             .line = 1,
         },
     };

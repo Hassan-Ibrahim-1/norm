@@ -26,3 +26,5 @@ add := fn (a: int, b: int) int {
     y := x();
     print(y);
 }
+
+z := add(2,3);
