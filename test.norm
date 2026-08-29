@@ -29,11 +29,14 @@
 // 
 // z := add(2,3);
 
-partial := fn (condition: bool) int {
-           if condition {
-               return 2;
-           } else {
-               return 1;
-           }
-           return 2;
-       }
+{
+    x: bool = 10;
+}
+
+// value := fn () int {
+//     return 1;
+// }
+// outer := fn () {
+//     result: bool = value();
+// }
+// 

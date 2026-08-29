@@ -319,6 +319,10 @@ const Sema = struct {
                     return .invalid;
                 };
 
+                if (vd.type_expr) |t| {
+                    sym.type = s.analyzeTypeExpr(t);
+                }
+
                 if (sym.type == .n_unknown) {
                     sym.type = s.inferType(vd.value.?);
                 }
@@ -717,7 +721,7 @@ const Sema = struct {
     fn expectTypeTryCast(s: *Sema, expr: *Nir.Expr, target: NormType) ?*Nir.Expr {
         if (tagEql(expr.type, target) or target == .n_unknown) return expr;
         const casted = s.tryCast(expr, target) orelse {
-            s.reportError(expr, "Expected {f} got {f}", .{ target, expr.type });
+            s.typeMismatchErr(target, expr.type, expr.token());
             return null;
         };
         return casted;
@@ -898,6 +902,14 @@ const Sema = struct {
         s.reportErrorLine(line, "A '{t}' statement is not allowed in global scope", .{stmt});
     }
 
+    fn typeMismatchErr(s: *Sema, expected: NormType, got: NormType, token: Token) void {
+        s.reportErrorLine(
+            token.line,
+            "Expected {f}, got {f}",
+            .{ expected, got },
+        );
+    }
+
     fn litType(l: *Ast.Expr.Literal) NormType {
         return switch (l.value) {
             .float => .n_float,
@@ -940,23 +952,34 @@ const Sema = struct {
     }
 
     fn alwaysReturns(stmts: []Nir.Stmt) bool {
-        // this is very naive
+        var always_returns = false;
 
         for (stmts) |stmt| {
             switch (stmt) {
-                .if_stmt => return false,
-                .block => |block| {
-                    const always_returns = alwaysReturns(block.stmts);
-                    if (always_returns) return true;
+                .return_stmt => always_returns = true,
+
+                .if_stmt => |if_stmt| {
+                    if (if_stmt.else_block == null) continue;
+
+                    var if_always_returns = alwaysReturns(if_stmt.then_block.stmts);
+                    for (if_stmt.else_if_blocks) |else_if_block| {
+                        if_always_returns = if_always_returns and alwaysReturns(else_if_block.then_block.stmts);
+                    }
+                    if_always_returns = if_always_returns and alwaysReturns(if_stmt.else_block.?.stmts);
+
+                    always_returns = always_returns or if_always_returns;
                 },
-                .return_stmt => return true,
-                // TODO: we can guarantee returns here but only if there is no
-                // preceding control statements in the loop
-                .infinite_for => {},
+                .block => |block| {
+                    always_returns = always_returns or alwaysReturns(block.stmts);
+                },
+                .infinite_for => |infinite_for| {
+                    always_returns = always_returns or alwaysReturns(infinite_for.block.stmts);
+                },
+
                 else => {},
             }
         }
-        return false;
+        return always_returns;
     }
 
     fn call(s: *Sema, c: *Ast.Expr.Call) *Nir.Expr {
@@ -1793,6 +1816,33 @@ test "mut variable declaration" {
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "error - variable declarations, mismatched types" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{
+            .source = "x: bool = 10;",
+            .error_msg = "Expected bool, got int",
+        },
+        .{
+            .source = "{x: bool = 10;}",
+            .error_msg = "Expected bool, got int",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expect(nir.errors.len == 1);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
     }
 }
 
