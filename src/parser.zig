@@ -1861,23 +1861,23 @@ test "functions" {
     } = &.{
         .{
             .source = "fn () {}",
-            .expected = "fn () {\n};",
+            .expected = "fn () {\n}",
         },
         .{
             .source = "fn (x: int) {}",
-            .expected = "fn (x: int) {\n};",
+            .expected = "fn (x: int) {\n}",
         },
         .{
             .source = "fn (x: int, y: float) {}",
-            .expected = "fn (x: int, y: float) {\n};",
+            .expected = "fn (x: int, y: float) {\n}",
         },
         .{
             .source = "fn (x: int, y: float) int {}",
-            .expected = "fn (x: int, y: float) int {\n};",
+            .expected = "fn (x: int, y: float) int {\n}",
         },
         .{
             .source = "fn (x: int, y: float) float {}",
-            .expected = "fn (x: int, y: float) float {\n};",
+            .expected = "fn (x: int, y: float) float {\n}",
         },
         .{
             .source =
@@ -1888,7 +1888,7 @@ test "functions" {
             .expected =
             \\fn (x: int, y: float) float {
             \\    print((x + y));
-            \\};
+            \\}
             ,
         },
         .{
@@ -1904,9 +1904,9 @@ test "functions" {
             \\outer := fn (x: int) int {
             \\    inner := fn (y: int) int {
             \\        return (x + y);
-            \\    };
+            \\    }
             \\    return inner(x, 3);
-            \\};
+            \\}
             ,
         },
         .{
@@ -1925,8 +1925,8 @@ test "functions" {
             \\        if true {
             \\            print("ok");
             \\        }
-            \\    };
-            \\};
+            \\    }
+            \\}
             ,
         },
     };
@@ -2083,7 +2083,7 @@ test "return stmt" {
             .expected =
             \\fn () {
             \\    return;
-            \\};
+            \\}
             ,
         },
         .{
@@ -2095,7 +2095,7 @@ test "return stmt" {
             .expected =
             \\fn () int {
             \\    return add(2, 3);
-            \\};
+            \\}
             ,
         },
         .{
@@ -2107,7 +2107,7 @@ test "return stmt" {
             .expected =
             \\fn (a: int, b: int) int {
             \\    return (a + b);
-            \\};
+            \\}
             ,
         },
     };

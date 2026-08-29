@@ -443,9 +443,9 @@ const SourceRenderer = struct {
 
     fn writeStmt(r: *SourceRenderer, stmt: anytype) Io.Writer.Error!void {
         switch (stmt) {
-            .expression => |s| try r.writeExpressionStmt(s),
-            .var_decl => |s| try r.writeVarDecl(s),
-            .var_assign => |s| try r.writeVarAssign(s),
+            .expression => |s| try r.writeExpressionStmt(s, false),
+            .var_decl => |s| try r.writeVarDecl(s, false),
+            .var_assign => |s| try r.writeVarAssign(s, false),
             .block => |s| try r.writeBlock(s),
             .if_stmt => |s| try r.writeIf(s),
             .for_stmt => |s| try r.writeFor(s),
@@ -458,12 +458,24 @@ const SourceRenderer = struct {
         }
     }
 
-    fn writeExpressionStmt(r: *SourceRenderer, stmt: anytype) Io.Writer.Error!void {
-        try r.writeExpr(stmt.expr);
-        try r.w.writeByte(';');
+    fn isFunctionExpr(expr: anytype) bool {
+        return switch (@TypeOf(expr.*)) {
+            Ast.Expr => expr.* == .function,
+            Nir.Expr => expr.kind == .function,
+            else => @compileError("unsupported expression type"),
+        };
     }
 
-    fn writeVarDecl(r: *SourceRenderer, decl: anytype) Io.Writer.Error!void {
+    fn writeTerminator(r: *SourceRenderer, expr: anytype, force: bool) Io.Writer.Error!void {
+        if (force or !isFunctionExpr(expr)) try r.w.writeByte(';');
+    }
+
+    fn writeExpressionStmt(r: *SourceRenderer, stmt: anytype, force_terminator: bool) Io.Writer.Error!void {
+        try r.writeExpr(stmt.expr);
+        try r.writeTerminator(stmt.expr, force_terminator);
+    }
+
+    fn writeVarDecl(r: *SourceRenderer, decl: anytype, force_terminator: bool) Io.Writer.Error!void {
         const mutable = if (decl.mutable) "mut " else "";
         switch (@TypeOf(decl)) {
             Ast.Stmt.VarDecl => {
@@ -472,7 +484,7 @@ const SourceRenderer = struct {
                     try r.writeAstExpr(decl.type_expr.?);
                     try r.w.writeAll(" = ");
                     try r.writeAstExpr(decl.value.?);
-                    try r.w.writeByte(';');
+                    try r.writeTerminator(decl.value.?, force_terminator);
                 } else if (decl.type_expr) |type_expr| {
                     try r.w.print("{s}{s}: ", .{ mutable, decl.ident.lexeme });
                     try r.writeAstExpr(type_expr);
@@ -480,22 +492,22 @@ const SourceRenderer = struct {
                 } else {
                     try r.w.print("{s}{s} := ", .{ mutable, decl.ident.lexeme });
                     try r.writeAstExpr(decl.value.?);
-                    try r.w.writeByte(';');
+                    try r.writeTerminator(decl.value.?, force_terminator);
                 }
             },
             Nir.Stmt.VarDecl => {
                 try r.w.print("{s}{s}: {f} = ", .{ mutable, decl.ident.lexeme, decl.type });
                 try r.writeNirExpr(decl.value);
-                try r.w.writeByte(';');
+                try r.writeTerminator(decl.value, force_terminator);
             },
             else => @compileError("unsupported variable declaration type"),
         }
     }
 
-    fn writeVarAssign(r: *SourceRenderer, assign: anytype) Io.Writer.Error!void {
+    fn writeVarAssign(r: *SourceRenderer, assign: anytype, force_terminator: bool) Io.Writer.Error!void {
         try r.w.print("{s} = ", .{assign.ident.lexeme});
         try r.writeExpr(assign.value);
-        try r.w.writeByte(';');
+        try r.writeTerminator(assign.value, force_terminator);
     }
 
     fn writeBlock(r: *SourceRenderer, block: anytype) Io.Writer.Error!void {
@@ -532,9 +544,9 @@ const SourceRenderer = struct {
     fn writeForPart(r: *SourceRenderer, part: anytype) Io.Writer.Error!void {
         switch (part) {
             inline else => |stmt| switch (@TypeOf(stmt)) {
-                Ast.Stmt.Expression, Nir.Stmt.Expression => try r.writeExpressionStmt(stmt),
-                Ast.Stmt.VarDecl, Nir.Stmt.VarDecl => try r.writeVarDecl(stmt),
-                Ast.Stmt.VarAssign, Nir.Stmt.VarAssign => try r.writeVarAssign(stmt),
+                Ast.Stmt.Expression, Nir.Stmt.Expression => try r.writeExpressionStmt(stmt, true),
+                Ast.Stmt.VarDecl, Nir.Stmt.VarDecl => try r.writeVarDecl(stmt, true),
+                Ast.Stmt.VarAssign, Nir.Stmt.VarAssign => try r.writeVarAssign(stmt, true),
                 else => @compileError("unsupported for statement part"),
             },
         }

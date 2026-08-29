@@ -3112,7 +3112,7 @@ test "functions, calls, and return stmts" {
             .expected =
             \\fn () {
             \\    return;
-            \\};
+            \\}
             ,
         },
         .{
@@ -3124,7 +3124,7 @@ test "functions, calls, and return stmts" {
             .expected =
             \\add: function = fn (a: int, b: int) int {
             \\    return (a:int + b:int):int;
-            \\};
+            \\}
             ,
         },
         .{
@@ -3136,7 +3136,7 @@ test "functions, calls, and return stmts" {
             .expected =
             \\fn (a: int, b: int) int {
             \\    return (a:int + b:int):int;
-            \\};
+            \\}
             ,
         },
         .{
@@ -3151,7 +3151,7 @@ test "functions, calls, and return stmts" {
             .expected =
             \\add: function = fn (a: int, b: int) int {
             \\    return (a:int + b:int):int;
-            \\};
+            \\}
             \\{
             \\    x: int = add(2, 3):int;
             \\}
@@ -3169,10 +3169,10 @@ test "functions, calls, and return stmts" {
             .expected =
             \\add: function = fn (a: int, b: int) int {
             \\    return (a:int + b:int):int;
-            \\};
+            \\}
             \\x: function = fn () int {
             \\    return add(2, 3):int;
-            \\};
+            \\}
             ,
         },
         .{
@@ -3187,10 +3187,10 @@ test "functions, calls, and return stmts" {
             .expected =
             \\x: function = fn () int {
             \\    return add(2, 3):int;
-            \\};
+            \\}
             \\add: function = fn (a: int, b: int) int {
             \\    return (a:int + b:int):int;
-            \\};
+            \\}
             ,
         },
         .{
@@ -3208,13 +3208,13 @@ test "functions, calls, and return stmts" {
             .expected =
             \\truth: function = fn () bool {
             \\    return true;
-            \\};
+            \\}
             \\message: function = fn () string {
             \\    return "ok";
-            \\};
+            \\}
             \\decimal: function = fn () float {
             \\    return 1.500;
-            \\};
+            \\}
             ,
         },
         .{
@@ -3230,9 +3230,9 @@ test "functions, calls, and return stmts" {
             \\outer: function = fn (value: int) int {
             \\    inner: function = fn () int {
             \\        return value:int;
-            \\    };
+            \\    }
             \\    return inner():int;
-            \\};
+            \\}
             ,
         },
         .{
@@ -3250,7 +3250,7 @@ test "functions, calls, and return stmts" {
             \\        return 0;
             \\    }
             \\    return count_down((value:int - 1):int):int;
-            \\};
+            \\}
             ,
         },
         .{
@@ -3270,7 +3270,7 @@ test "functions, calls, and return stmts" {
             \\    } else {
             \\        return 2;
             \\    }
-            \\};
+            \\}
             ,
         },
         .{
@@ -3286,7 +3286,7 @@ test "functions, calls, and return stmts" {
             \\    {
             \\        return 1;
             \\    }
-            \\};
+            \\}
             ,
         },
         .{
@@ -3310,13 +3310,13 @@ test "functions, calls, and return stmts" {
             \\        return true;
             \\    }
             \\    return is_odd((value:int - 1):int):bool;
-            \\};
+            \\}
             \\is_odd: function = fn (value: int) bool {
             \\    if (value:int == 0):bool {
             \\        return false;
             \\    }
             \\    return is_even((value:int - 1):int):bool;
-            \\};
+            \\}
             ,
         },
         .{
@@ -3340,7 +3340,7 @@ test "functions, calls, and return stmts" {
             \\    } else {
             \\        return 3;
             \\    }
-            \\};
+            \\}
             ,
         },
         .{
@@ -3353,9 +3353,9 @@ test "functions, calls, and return stmts" {
             .expected =
             \\outer: function = fn () int {
             \\    fn () {
-            \\    };
+            \\    }
             \\    return 1;
-            \\};
+            \\}
             ,
         },
         .{
@@ -3372,7 +3372,7 @@ test "functions, calls, and return stmts" {
             .expected =
             \\implementation: function = fn () bool {
             \\    return true;
-            \\};
+            \\}
             \\alias: function = implementation;
             \\{
             \\    direct: bool = implementation():bool;
@@ -3392,7 +3392,7 @@ test "functions, calls, and return stmts" {
             .expected =
             \\identity: function = fn (value: int) int {
             \\    return value:int;
-            \\};
+            \\}
             \\{
             \\    result: int = (identity):function(7):int;
             \\}
@@ -3429,10 +3429,10 @@ test "functions, calls, and return stmts" {
             .expected =
             \\double: function = fn (value: int) int {
             \\    return (value:int * 2):int;
-            \\};
+            \\}
             \\increment: function = fn (value: int) int {
             \\    return (value:int + 1):int;
-            \\};
+            \\}
             \\{
             \\    result: int = double(increment(3):int):int;
             \\}
@@ -3454,10 +3454,10 @@ test "functions, calls, and return stmts" {
             .expected =
             \\decimal: function = fn () float {
             \\    return 1.500;
-            \\};
+            \\}
             \\message: function = fn () string {
             \\    return "ok";
-            \\};
+            \\}
             \\{
             \\    number: float = decimal():float;
             \\    text: string = message():string;
@@ -3848,7 +3848,7 @@ test "declaration order" {
             \\right: int = 2;
             \\add: function = fn (a: int, b: int) int {
             \\    return (a:int + b:int):int;
-            \\};
+            \\}
             \\left: int = 1;
             \\{
             \\    result: int = add(left:int, right:int):int;
@@ -3865,7 +3865,7 @@ test "declaration order" {
             .expected =
             \\implementation: function = fn () int {
             \\    return 1;
-            \\};
+            \\}
             \\alias: function = implementation;
             ,
         },
