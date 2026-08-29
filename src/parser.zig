@@ -182,12 +182,10 @@ const Parser = struct {
             p.consumeSemicolon();
             return print_stmt;
         } else if (p.match(.kw_for)) {
-            if (p.parsing_stmt.contains(.for_loop)) {
-                return p.forStmt();
-            }
-
+            const previous_parsing_stmt = p.parsing_stmt;
             p.parsing_stmt.insert(.for_loop);
-            defer p.parsing_stmt.remove(.for_loop);
+            defer p.parsing_stmt = previous_parsing_stmt;
+
             const stmt = p.forStmt();
             return stmt;
         } else if (p.matchEither(.kw_break, .kw_continue)) {
