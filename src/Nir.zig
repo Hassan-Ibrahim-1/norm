@@ -197,7 +197,20 @@ pub const NormType = union(enum) {
     n_function: *Function,
 
     pub fn format(nt: NormType, w: *Io.Writer) Io.Writer.Error!void {
-        try w.print("{s}", .{@tagName(nt)[2..]});
+        switch (nt) {
+            // .n_function => |f| {
+            //     try w.writeAll("fn (");
+            //     for (f.parameters, 0..) |param, i| {
+            //         if (i < f.parameters.len - 1) {
+            //             try w.print("{s}:  {f}, ", .{ param.name.lexeme, param.type });
+            //         } else {
+            //             try w.print("{s}:  {f}", .{ param.name.lexeme, param.type });
+            //         }
+            //     }
+            //     try w.print(") {f}", .{f.return_type});
+            // },
+            inline else => try w.print("{s}", .{@tagName(nt)[2..]}),
+        }
     }
 
     pub fn isNumeric(ty: NormType) bool {

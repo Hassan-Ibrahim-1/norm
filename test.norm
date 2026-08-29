@@ -1,30 +1,39 @@
-x := fn () int {
-    add_2 := fn (y: int) {
-        some_string := fn () string {
-            return "hey";
-        }
+// x := fn () int {
+//     add_2 := fn (y: int) {
+//         some_string := fn () string {
+//             return "hey";
+//         }
+// 
+//         print(some_string());
+//         if y >= 3 {
+//             print(add(2,y));
+//         } else if y <= 0 {
+//             print(y);
+//         } else {
+//             print(y+3);
+//         }
+//     }
+// 
+//     add_2(3);
+//     return 2 + 3;
+// }
+// 
+// add := fn (a: int, b: int) int {
+//     return a + b;
+// }
+// 
+// {
+//     y := x();
+//     print(y);
+// }
+// 
+// z := add(2,3);
 
-        print(some_string());
-        if y >= 3 {
-            print(add(2,y));
-        } else if y <= 0 {
-            print(y);
-        } else {
-            print(y+3);
-        }
-    }
-
-    add_2(3);
-    return 2 + 3;
-}
-
-add := fn (a: int, b: int) int {
-    return a + b;
-}
-
-{
-    y := x();
-    print(y);
-}
-
-z := add(2,3);
+partial := fn (condition: bool) int {
+           if condition {
+               return 2;
+           } else {
+               return 1;
+           }
+           return 2;
+       }

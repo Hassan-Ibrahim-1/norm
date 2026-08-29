@@ -17,6 +17,8 @@ const Sema = struct {
     arena: Allocator,
     scratch: Allocator,
 
+    stmt_ctx_pool: std.heap.MemoryPool(StmtContext),
+
     errors: std.ArrayList(Nir.Diagnostics),
     // TODO: reset on statement boundary
     panic_mode: bool,
@@ -25,20 +27,20 @@ const Sema = struct {
 
     /// `level` is `top` if we are not in a for loop
     current_for_block_scope: *Nir.Scope,
+    enclosing_function_type: *NormType.Function,
 
-    analyzing_stmt: AnalyzingStmt,
+    stmt_ctx: ?*StmtContext,
 
-    fn_ctx: FunctionContext,
+    const StmtContext = struct {
+        parent: ?*StmtContext = null,
+        stmt: Ast.Stmt,
 
-    const AnalyzingStmt = union(enum) {
-        other,
-        for_loop,
-    };
-
-    const FunctionContext = struct {
-        // gives the name of the identifier if the function is bound to one.
-        function_identifier: ?Token,
-        return_type: NormType,
+        fn isLoop(ctx: StmtContext) bool {
+            return switch (ctx.stmt) {
+                .for_stmt, .infinite_for, .condition_for => true,
+                else => false,
+            };
+        }
     };
 
     fn mask(ty: NormType) u64 {
@@ -73,18 +75,22 @@ const Sema = struct {
         return .{
             .arena = arena,
             .scratch = scratch,
+            .stmt_ctx_pool = .empty,
+
+            .stmt_ctx = null,
+            .enclosing_function_type = undefined,
 
             .invalid_expr = makeInvalid(arena),
             .sym_table = sym_table,
             .errors = .empty,
-            .analyzing_stmt = .other,
             .current_for_block_scope = sym_table.top_scope,
             .panic_mode = false,
-            .fn_ctx = .{
-                .function_identifier = null,
-                .return_type = .n_unknown,
-            },
         };
+    }
+
+    fn deinit(s: *Sema) void {
+        s.stmt_ctx_pool.deinit(s.scratch);
+        s.* = undefined;
     }
 
     fn analyzeTypeExpr(s: *Sema, expr: *Ast.Expr) NormType {
@@ -269,6 +275,8 @@ const Sema = struct {
         if (s.errors.items.len > 0) return &.{};
 
         for (stmts) |stmt| {
+            defer _ = s.stmt_ctx_pool.reset(s.scratch, .retain_capacity);
+
             if (stmt == .var_decl) continue;
             const nir_stmt = s.statement(stmt);
             nir_stmts.append(s.arena, nir_stmt) catch oom();
@@ -277,16 +285,33 @@ const Sema = struct {
         return nir_stmts.items;
     }
 
+    fn beginStmtCtx(s: *Sema, stmt: Ast.Stmt) void {
+        const stmt_ctx = s.stmt_ctx_pool.create(s.scratch) catch oom();
+        stmt_ctx.stmt = stmt;
+        stmt_ctx.parent = s.stmt_ctx;
+
+        s.stmt_ctx = stmt_ctx;
+    }
+
+    fn endStmtCtx(s: *Sema) void {
+        if (s.stmt_ctx == null) return;
+
+        const parent = s.stmt_ctx.?.parent;
+        s.stmt_ctx_pool.destroy(s.stmt_ctx.?);
+
+        s.stmt_ctx = parent;
+    }
+
     fn statement(s: *Sema, stmt: Ast.Stmt) Nir.Stmt {
+        s.beginStmtCtx(stmt);
+        defer s.endStmtCtx();
+
         switch (stmt) {
             .expression => |expr_stmt| {
                 const nir_expr = s.expression(expr_stmt.expr);
                 return .{ .expression = .{ .expr = nir_expr } };
             },
             .var_decl => |vd| {
-                const previous_fn_ident = s.fn_ctx.function_identifier;
-                defer s.fn_ctx.function_identifier = previous_fn_ident;
-
                 if (vd.value == null) @panic("todo: zero values");
 
                 const sym = s.sym_table.findOrRegister(vd.ident.lexeme, vd.mutable) orelse {
@@ -296,11 +321,6 @@ const Sema = struct {
 
                 if (sym.type == .n_unknown) {
                     sym.type = s.inferType(vd.value.?);
-                }
-
-                if (sym.type == .n_function) {
-                    s.fn_ctx.function_identifier = vd.ident;
-                    s.fn_ctx.function_identifier = vd.ident;
                 }
 
                 const value = s.expectTypeTryCast(s.expression(vd.value.?), sym.type);
@@ -332,8 +352,7 @@ const Sema = struct {
                 const block_scope = s.beginScope();
                 defer s.endScope();
 
-                if (s.analyzing_stmt == .for_loop) {
-                    s.analyzing_stmt = .other;
+                if (s.stmt_ctx.?.parent != null and s.stmt_ctx.?.parent.?.isLoop()) {
                     s.current_for_block_scope = block_scope;
                 }
 
@@ -418,8 +437,6 @@ const Sema = struct {
             },
 
             .infinite_for => |infinite_for| {
-                s.analyzing_stmt = .for_loop;
-
                 const for_scope = s.beginScope();
                 defer s.endScope();
 
@@ -435,8 +452,6 @@ const Sema = struct {
             },
 
             .condition_for => |condition_for| {
-                s.analyzing_stmt = .for_loop;
-
                 const for_scope = s.beginScope();
                 defer s.endScope();
 
@@ -458,8 +473,6 @@ const Sema = struct {
             },
 
             .for_stmt => |for_stmt| {
-                s.analyzing_stmt = .for_loop;
-
                 const for_scope = s.beginScope();
                 defer s.endScope();
 
@@ -536,8 +549,8 @@ const Sema = struct {
             .return_stmt => |return_stmt| {
                 const nir_expr = if (return_stmt.expr) |expr| s.expression(expr) else null;
                 const return_type = if (nir_expr) |expr| expr.type else .n_void;
-                if (!tagEql(return_type, s.fn_ctx.return_type)) {
-                    s.wrongReturnType(return_type, s.fn_ctx.return_type, return_stmt.token);
+                if (!tagEql(return_type, s.enclosing_function_type.return_type)) {
+                    s.wrongReturnTypeErr(return_type, s.enclosing_function_type.return_type, return_stmt.token);
                     return .invalid;
                 }
                 return .{ .return_stmt = .{ .token = return_stmt.token, .expr = nir_expr } };
@@ -595,7 +608,7 @@ const Sema = struct {
         );
     }
 
-    fn wrongReturnType(s: *Sema, actual: NormType, expected: NormType, token: Token) void {
+    fn wrongReturnTypeErr(s: *Sema, actual: NormType, expected: NormType, token: Token) void {
         s.reportErrorLine(
             token.line,
             "Expected function to return {f}, instead got {f}",
@@ -612,15 +625,14 @@ const Sema = struct {
             .identifier => |*i| s.identifier(i),
             .literal => |*l| s.literal(l),
             .function => |*f| b: {
-                const previous_ret = s.fn_ctx.return_type;
-                defer s.fn_ctx.return_type = previous_ret;
+                const previous_enclosing = s.enclosing_function_type;
+                defer s.enclosing_function_type = previous_enclosing;
 
-                const fn_type = if (s.fn_ctx.function_identifier) |ident| t: {
-                    const sym = s.sym_table.find(ident.lexeme, s.sym_table.current_scope);
-                    break :t sym.type;
-                } else s.inferType(expr);
+                // There is sometimes duplicated work that could be amended. We infer function type twice here
+                // and it is also allocated twice as well.
+                const fn_type = s.inferType(expr);
 
-                s.fn_ctx.return_type = fn_type.n_function.return_type;
+                s.enclosing_function_type = fn_type.n_function;
 
                 break :b s.function(f, fn_type.n_function);
             },
@@ -915,6 +927,8 @@ const Sema = struct {
 
         const body = s.statement(.{ .block = f.body }).block;
 
+        if (s.errors.items.len > 0) return s.invalid_expr;
+
         if (inferred_type.return_type != .n_void) {
             const always_returns = alwaysReturns(body.stmts);
             if (!always_returns) {
@@ -926,14 +940,11 @@ const Sema = struct {
     }
 
     fn alwaysReturns(stmts: []Nir.Stmt) bool {
+        // this is very naive
+
         for (stmts) |stmt| {
             switch (stmt) {
-                .if_stmt => |if_stmt| {
-                    if (if_stmt.else_block) |else_block| {
-                        const else_returns = alwaysReturns(else_block.stmts);
-                        if (else_returns) return true;
-                    }
-                },
+                .if_stmt => return false,
                 .block => |block| {
                     const always_returns = alwaysReturns(block.stmts);
                     if (always_returns) return true;
@@ -1074,6 +1085,7 @@ pub fn analyze(gpa: Allocator, ast: *Ast) Nir {
     var arena: std.heap.ArenaAllocator = .init(gpa);
 
     var sema = Sema.init(gpa, gpa, arena.allocator());
+    defer sema.deinit();
 
     const stmts = sema.analyze(ast.stmts);
 
@@ -3032,6 +3044,7 @@ test "loop jump statements" {
 
 test "functions, calls, and return stmts" {
     const gpa = testing.allocator;
+
     const tests: []const struct {
         source: []const u8,
         expected: []const u8,
@@ -3126,6 +3139,277 @@ test "functions, calls, and return stmts" {
             \\};
             ,
         },
+        .{
+            .source =
+            \\truth := fn () bool {
+            \\    return true;
+            \\}
+            \\message := fn () string {
+            \\    return "ok";
+            \\}
+            \\decimal := fn () float {
+            \\    return 1.5;
+            \\}
+            ,
+            .expected =
+            \\truth: function = fn () bool {
+            \\    return true;
+            \\};
+            \\message: function = fn () string {
+            \\    return "ok";
+            \\};
+            \\decimal: function = fn () float {
+            \\    return 1.500;
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\outer := fn (value: int) int {
+            \\    inner := fn () int {
+            \\        return value;
+            \\    }
+            \\    return inner();
+            \\}
+            ,
+            .expected =
+            \\outer: function = fn (value: int) int {
+            \\    inner: function = fn () int {
+            \\        return value:int;
+            \\    };
+            \\    return inner():int;
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\count_down := fn (value: int) int {
+            \\    if value == 0 {
+            \\        return 0;
+            \\    }
+            \\    return count_down(value - 1);
+            \\}
+            ,
+            .expected =
+            \\count_down: function = fn (value: int) int {
+            \\    if (value:int == 0):bool {
+            \\        return 0;
+            \\    }
+            \\    return count_down((value:int - 1):int):int;
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\choose := fn (condition: bool) int {
+            \\    if condition {
+            \\        return 1;
+            \\    } else {
+            \\        return 2;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\choose: function = fn (condition: bool) int {
+            \\    if condition:bool {
+            \\        return 1;
+            \\    } else {
+            \\        return 2;
+            \\    }
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\nested := fn () int {
+            \\    {
+            \\        return 1;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\nested: function = fn () int {
+            \\    {
+            \\        return 1;
+            \\    }
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\is_even := fn (value: int) bool {
+            \\    if value == 0 {
+            \\        return true;
+            \\    }
+            \\    return is_odd(value - 1);
+            \\}
+            \\is_odd := fn (value: int) bool {
+            \\    if value == 0 {
+            \\        return false;
+            \\    }
+            \\    return is_even(value - 1);
+            \\}
+            ,
+            .expected =
+            \\is_even: function = fn (value: int) bool {
+            \\    if (value:int == 0):bool {
+            \\        return true;
+            \\    }
+            \\    return is_odd((value:int - 1):int):bool;
+            \\};
+            \\is_odd: function = fn (value: int) bool {
+            \\    if (value:int == 0):bool {
+            \\        return false;
+            \\    }
+            \\    return is_even((value:int - 1):int):bool;
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\classify := fn (first: bool, second: bool) int {
+            \\    if first {
+            \\        return 1;
+            \\    } else if second {
+            \\        return 2;
+            \\    } else {
+            \\        return 3;
+            \\    }
+            \\}
+            ,
+            .expected =
+            \\classify: function = fn (first: bool, second: bool) int {
+            \\    if first:bool {
+            \\        return 1;
+            \\    } else if second:bool {
+            \\        return 2;
+            \\    } else {
+            \\        return 3;
+            \\    }
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\outer := fn () int {
+            \\    fn () {};
+            \\    return 1;
+            \\}
+            ,
+            .expected =
+            \\outer: function = fn () int {
+            \\    fn () {
+            \\    };
+            \\    return 1;
+            \\};
+            ,
+        },
+        .{
+            .source =
+            \\implementation := fn () bool {
+            \\    return true;
+            \\}
+            \\alias := implementation;
+            \\{
+            \\    direct := implementation();
+            \\    indirect := alias();
+            \\}
+            ,
+            .expected =
+            \\implementation: function = fn () bool {
+            \\    return true;
+            \\};
+            \\alias: function = implementation;
+            \\{
+            \\    direct: bool = implementation():bool;
+            \\    indirect: bool = alias():bool;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\identity := fn (value: int) int {
+            \\    return value;
+            \\}
+            \\{
+            \\    result := (identity)(7);
+            \\}
+            ,
+            .expected =
+            \\identity: function = fn (value: int) int {
+            \\    return value:int;
+            \\};
+            \\{
+            \\    result: int = (identity):function(7):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\{
+            \\    result := (fn (value: int) int {
+            \\        return value;
+            \\    })(7);
+            \\}
+            ,
+            .expected =
+            \\{
+            \\    result: int = (fn (value: int) int {
+            \\        return value:int;
+            \\    }):function(7):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\double := fn (value: int) int {
+            \\    return value * 2;
+            \\}
+            \\increment := fn (value: int) int {
+            \\    return value + 1;
+            \\}
+            \\{
+            \\    result := double(increment(3));
+            \\}
+            ,
+            .expected =
+            \\double: function = fn (value: int) int {
+            \\    return (value:int * 2):int;
+            \\};
+            \\increment: function = fn (value: int) int {
+            \\    return (value:int + 1):int;
+            \\};
+            \\{
+            \\    result: int = double(increment(3):int):int;
+            \\}
+            ,
+        },
+        .{
+            .source =
+            \\decimal := fn () float {
+            \\    return 1.5;
+            \\}
+            \\message := fn () string {
+            \\    return "ok";
+            \\}
+            \\{
+            \\    number := decimal();
+            \\    text := message();
+            \\}
+            ,
+            .expected =
+            \\decimal: function = fn () float {
+            \\    return 1.500;
+            \\};
+            \\message: function = fn () string {
+            \\    return "ok";
+            \\};
+            \\{
+            \\    number: float = decimal():float;
+            \\    text: string = message():string;
+            \\}
+            ,
+        },
     };
 
     for (tests) |t| {
@@ -3134,6 +3418,228 @@ test "functions, calls, and return stmts" {
         const actual = try testAnalyze(gpa, t.source);
         defer gpa.free(actual);
         try testing.expectEqualStrings(t.expected, actual);
+    }
+}
+
+test "error - functions, calls, and returns" {
+    const gpa = testing.allocator;
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+        line: u32,
+    } = &.{
+        .{
+            .source = "duplicate := fn (value: int, value: int) {}",
+            .error_msg = "Variable value is already defined",
+            .line = 1,
+        },
+        .{
+            .source = "missing := fn () int {}",
+            .error_msg = "Function does not return int in every branch",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\partial := fn (condition: bool) int {
+            \\    if condition {
+            \\        return 1;
+            \\    }
+            \\}
+            ,
+            .error_msg = "Function does not return int in every branch",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\takes_one := fn (value: int) {}
+            \\{
+            \\    takes_one();
+            \\}
+            ,
+            .error_msg = "Expected 1 arguments but got 0 instead",
+            .line = 3,
+        },
+        .{
+            .source =
+            \\takes_one := fn (value: int) {}
+            \\{
+            \\    takes_one(1, 2);
+            \\}
+            ,
+            .error_msg = "Expected 1 arguments but got 2 instead",
+            .line = 3,
+        },
+        .{
+            .source =
+            \\takes_pair := fn (number: int, flag: bool) {}
+            \\{
+            \\    takes_pair(true, false);
+            \\}
+            ,
+            .error_msg = "Expected argument 1 to be of type int but got bool instead",
+            .line = 3,
+        },
+        .{
+            .source =
+            \\takes_pair := fn (number: int, flag: bool) {}
+            \\{
+            \\    takes_pair(1, 2);
+            \\}
+            ,
+            .error_msg = "Expected argument 2 to be of type bool but got int instead",
+            .line = 3,
+        },
+        .{
+            .source =
+            \\{
+            \\    1();
+            \\}
+            ,
+            .error_msg = "Expected callee to be a function but got int instead",
+            .line = 2,
+        },
+        .{
+            .source =
+            \\returns_int := fn () int {
+            \\    return 1;
+            \\}
+            \\{
+            \\    returns_int()();
+            \\}
+            ,
+            .error_msg = "Expected callee to be a function but got int instead",
+            .line = 5,
+        },
+        .{
+            .source =
+            \\noop := fn () {}
+            \\{
+            \\    result := noop();
+            \\}
+            ,
+            .error_msg = "Type void is not assignable",
+            .line = 3,
+        },
+        .{
+            .source =
+            \\bad := fn () {
+            \\    return 1;
+            \\}
+            ,
+            .error_msg = "Expected function to return void, instead got int",
+            .line = 2,
+        },
+        .{
+            .source =
+            \\partial := fn (condition: bool) int {
+            \\    if condition {
+            \\    } else {
+            \\        return 1;
+            \\    }
+            \\}
+            ,
+            .error_msg = "Function does not return int in every branch",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\partial := fn (first: bool, second: bool) int {
+            \\    if first {
+            \\        return 1;
+            \\    } else if second {
+            \\    } else {
+            \\        return 2;
+            \\    }
+            \\}
+            ,
+            .error_msg = "Function does not return int in every branch",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\value := fn () int {
+            \\    return 1;
+            \\}
+            \\outer := fn () {
+            \\    result: bool = value();
+            \\}
+            ,
+            .error_msg = "Expected bool got int",
+            .line = 5,
+        },
+        .{
+            .source =
+            \\{
+            \\    mut transform := fn (value: int) int {
+            \\        return value;
+            \\    };
+            \\    transform = fn (value: bool) bool {
+            \\        return value;
+            \\    }
+            \\    result := transform(1);
+            \\}
+            ,
+            .error_msg = "Expected function got function",
+            .line = 5,
+        },
+        .{
+            .source =
+            \\takes_int := fn (value: int) {}
+            \\{
+            \\    takes_int(
+            \\        true
+            \\    );
+            \\}
+            ,
+            .error_msg = "Expected argument 1 to be of type int but got bool instead",
+            .line = 4,
+        },
+        .{
+            .source = "return 1;",
+            .error_msg = "Return statement outside a function",
+            .line = 1,
+        },
+        .{
+            .source =
+            \\bad := fn () int {
+            \\    return true;
+            \\}
+            ,
+            .error_msg = "Expected function to return int, instead got bool",
+            .line = 2,
+        },
+        .{
+            .source =
+            \\bad := fn () int {
+            \\    return;
+            \\}
+            ,
+            .error_msg = "Expected function to return int, instead got void",
+            .line = 2,
+        },
+        .{
+            .source =
+            \\identity := fn (value: int) int {
+            \\    return value;
+            \\}
+            \\bad := fn () int {
+            \\    return identity(true);
+            \\}
+            ,
+            .error_msg = "Expected argument 1 to be of type int but got bool instead",
+            .line = 5,
+        },
+    };
+
+    for (tests) |t| {
+        std.debug.print("failed test case with source=\"{s}\"\n", .{t.source});
+
+        var nir = try testAnalyzeFailure(gpa, t.source);
+        defer nir.deinit();
+
+        try testing.expectEqual(@as(usize, 1), nir.errors.len);
+        try testing.expectEqualStrings(t.error_msg, nir.errors[0].error_msg);
+        try testing.expectEqual(t.line, nir.errors[0].line);
     }
 }
 
