@@ -30,6 +30,7 @@ pub const Diagnostics = struct {
 
 pub const Stmt = union(enum) {
     pub const invalid: Stmt = undefined;
+    pub const Tag = std.meta.Tag(Stmt);
 
     pub const Expression = struct {
         expr: *Expr,

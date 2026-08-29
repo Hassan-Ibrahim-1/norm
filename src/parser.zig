@@ -24,7 +24,10 @@ const Parser = struct {
     current: Token,
     next: Token,
 
-    parsing_loop: bool,
+    parsing_stmt: std.EnumSet(enum {
+        for_loop,
+        function,
+    }),
 
     // TODO: reset on statement boundary
     panic_mode: bool,
@@ -134,7 +137,7 @@ const Parser = struct {
             .previous = tokens[0],
             .current = tokens[0],
             .next = tokens[0],
-            .parsing_loop = false,
+            .parsing_stmt = .empty,
             .panic_mode = false,
             .errors = .empty,
         };
@@ -179,16 +182,16 @@ const Parser = struct {
             p.consumeSemicolon();
             return print_stmt;
         } else if (p.match(.kw_for)) {
-            if (p.parsing_loop) {
+            if (p.parsing_stmt.contains(.for_loop)) {
                 return p.forStmt();
             }
 
-            p.parsing_loop = true;
+            p.parsing_stmt.insert(.for_loop);
+            defer p.parsing_stmt.remove(.for_loop);
             const stmt = p.forStmt();
-            defer p.parsing_loop = false;
             return stmt;
         } else if (p.matchEither(.kw_break, .kw_continue)) {
-            if (!p.parsing_loop) {
+            if (!p.parsing_stmt.contains(.for_loop)) {
                 p.jumpStmtOutsideLoop(p.previous);
                 return .invalid;
             }
@@ -196,6 +199,10 @@ const Parser = struct {
             p.consumeSemicolon();
             return stmt;
         } else if (p.match(.kw_return)) {
+            if (!p.parsing_stmt.contains(.function)) {
+                p.returnStmtOutsideFn(p.previous);
+                return .invalid;
+            }
             const ret = p.returnStmt();
             p.consumeSemicolon();
             return ret;
@@ -586,6 +593,10 @@ const Parser = struct {
     }
 
     fn function(p: *Parser) *Ast.Expr {
+        const previous_parsing_stmt = p.parsing_stmt;
+        p.parsing_stmt.insert(.function);
+        defer p.parsing_stmt = previous_parsing_stmt;
+
         const token = p.previous;
         p.consume(.left_paren, "Expected '(' after fn keyword");
 
@@ -733,8 +744,6 @@ pub fn parse(gpa: Allocator, tokens: []Token) Ast {
     var stmts: std.ArrayList(Ast.Stmt) = .empty;
 
     while (true) {
-        defer p.parsing_loop = false;
-
         const stmt = p.statement();
         stmts.append(arena.allocator(), stmt) catch oom();
 
@@ -1886,6 +1895,24 @@ test "functions" {
         },
         .{
             .source =
+            \\outer := fn (x: int) int {
+            \\    inner := fn (y: int) int {
+            \\        return x + y;
+            \\    }
+            \\    return inner(x, 3);
+            \\}
+            ,
+            .expected =
+            \\outer := fn (x: int) int {
+            \\    inner := fn (y: int) int {
+            \\        return (x + y);
+            \\    };
+            \\    return inner(x, 3);
+            \\};
+            ,
+        },
+        .{
+            .source =
             \\outer := fn () {
             \\    inner := fn () {
             \\        if true {
@@ -1950,6 +1977,39 @@ test "loop control statements: errors" {
             \\}
             ,
             .error_msg = "Found continue statement outside a loop",
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source=\"{s}\"", .{t.source});
+
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+
+        const errors = try testParseError(arena.allocator(), t.source);
+        if (errors.len != 1) {
+            std.debug.print("Expected 1 error, got {} instead.", .{errors.len});
+            dbg("errors", errors);
+        }
+
+        try testing.expectEqualStrings(t.error_msg, errors[0]);
+    }
+}
+
+test "error - return statement outside function" {
+    const gpa = testing.allocator;
+
+    const tests: []const struct {
+        source: []const u8,
+        error_msg: []const u8,
+    } = &.{
+        .{
+            .source = "return 1;",
+            .error_msg = "Return statement outside a function",
+        },
+        .{
+            .source = "{ return 1; }",
+            .error_msg = "Return statement outside a function",
         },
     };
 

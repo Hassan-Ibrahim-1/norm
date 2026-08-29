@@ -29,14 +29,10 @@
 // 
 // z := add(2,3);
 
-{
-    x: bool = 10;
-}
+takes_int := fn (value: int) {}
 
-// value := fn () int {
-//     return 1;
-// }
-// outer := fn () {
-//     result: bool = value();
-// }
-// 
+{
+   takes_int(
+       true
+   );
+}
