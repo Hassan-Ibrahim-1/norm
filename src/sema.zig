@@ -2795,7 +2795,7 @@ test "variable assignment failure" {
             \\    x = false;
             \\}
             ,
-            .error_msg = "Expected int got bool",
+            .error_msg = "Expected int, got bool",
         },
         .{
             .source =
@@ -2806,7 +2806,7 @@ test "variable assignment failure" {
             \\    }
             \\}
             ,
-            .error_msg = "Expected int got bool",
+            .error_msg = "Expected int, got bool",
         },
         .{
             .source =
@@ -2819,7 +2819,7 @@ test "variable assignment failure" {
             \\    }
             \\}
             ,
-            .error_msg = "Expected int got bool",
+            .error_msg = "Expected int, got bool",
         },
         .{
             .source =
@@ -2832,7 +2832,7 @@ test "variable assignment failure" {
             \\    }
             \\}
             ,
-            .error_msg = "Expected int got bool",
+            .error_msg = "Expected int, got bool",
         },
         .{
             .source =
@@ -2843,7 +2843,7 @@ test "variable assignment failure" {
             \\    }
             \\}
             ,
-            .error_msg = "Expected int got bool",
+            .error_msg = "Expected int, got bool",
         },
         .{
             .source =
@@ -2927,7 +2927,7 @@ test "variable assignment failure" {
             \\    }
             \\}
             ,
-            .error_msg = "Expected int got bool",
+            .error_msg = "Expected int, got bool",
         },
     };
 
@@ -3614,7 +3614,7 @@ test "error - functions, calls, and returns" {
             \\    result: bool = value();
             \\}
             ,
-            .error_msg = "Expected bool got int",
+            .error_msg = "Expected bool, got int",
             .line = 5,
         },
         .{
@@ -3629,7 +3629,7 @@ test "error - functions, calls, and returns" {
             \\    result := transform(1);
             \\}
             ,
-            .error_msg = "Expected function got function",
+            .error_msg = "Expected function, got function",
             .line = 5,
         },
         .{
