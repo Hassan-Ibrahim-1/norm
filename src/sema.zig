@@ -142,6 +142,8 @@ const Sema = struct {
 
         for (ordered_decls) |decl| {
             const nir_stmt = s.statement(.{ .var_decl = decl });
+            if (s.panic_mode) break;
+
             nir_stmts.append(s.arena, nir_stmt) catch oom();
         }
     }
@@ -275,10 +277,13 @@ const Sema = struct {
         if (s.errors.items.len > 0) return &.{};
 
         for (stmts) |stmt| {
+            if (stmt == .var_decl) continue;
+
             defer _ = s.stmt_ctx_pool.reset(s.scratch, .retain_capacity);
 
-            if (stmt == .var_decl) continue;
             const nir_stmt = s.statement(stmt);
+            if (s.panic_mode) break;
+
             nir_stmts.append(s.arena, nir_stmt) catch oom();
         }
 
@@ -303,6 +308,8 @@ const Sema = struct {
     }
 
     fn statement(s: *Sema, stmt: Ast.Stmt) Nir.Stmt {
+        if (s.panic_mode) return .invalid;
+
         s.beginStmtCtx(stmt);
         defer s.endStmtCtx();
 

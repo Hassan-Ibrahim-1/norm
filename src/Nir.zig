@@ -429,6 +429,8 @@ pub const Expr = struct {
     };
 
     pub fn token(e: *const Expr) Token {
+        if (e.type == .n_unknown) return .{ .type = .eof, .lexeme = "", .line = 0 };
+
         return switch (e.kind) {
             .binary => |*b| b.operator,
             .unary => |*u| u.operator,
