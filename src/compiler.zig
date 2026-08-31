@@ -518,7 +518,7 @@ pub const Compiler = struct {
             .literal => |*l| c.literal(l),
             .identifier => |*i| c.identifier(i),
             .call => @panic("todo"),
-            .function => @panic("todo"),
+            .function => |*f| c.function(f),
         }
     }
 
@@ -603,6 +603,11 @@ pub const Compiler = struct {
             .bang => c.emitOpCode(.op_not, line),
             else => unreachable,
         }
+    }
+
+    fn function(c: *Compiler, f: *Nir.Expr.Function) void {
+        _ = c; // autofix
+        _ = f; // autofix
     }
 
     fn cast(c: *Compiler, cst: *Nir.Expr.Cast, target: NormType) void {
