@@ -581,6 +581,14 @@ const Sema = struct {
         s.sym_table.endScope();
     }
 
+    fn beginFn(s: *Sema) *Nir.Scope {
+        return s.sym_table.beginFn();
+    }
+
+    fn endFn(s: *Sema) void {
+        s.sym_table.endFn();
+    }
+
     fn expectedTypeExprErr(s: *Sema, expr: *Ast.Expr) NormType {
         const rendered_expr = debug.printExpr(s.arena, expr);
         s.reportErrorAst(
@@ -937,8 +945,8 @@ const Sema = struct {
     }
 
     fn function(s: *Sema, f: *Ast.Expr.Function, inferred_type: *NormType.Function) *Nir.Expr {
-        const scope = s.beginScope();
-        defer s.endScope();
+        const scope = s.beginFn();
+        defer s.endFn();
 
         for (inferred_type.parameters) |param| {
             const already_exists = s.sym_table.register(param.name.lexeme, param.type, false);

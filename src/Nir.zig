@@ -18,7 +18,13 @@ const trait = @import("trait.zig");
 
 pub const Scope = struct {
     level: Level,
-    // If `level` is .top this field is garbage
+
+    /// If `level` is .top then this is just the number of globals
+    /// If `level` is .local then this is relative to the closest containing function
+    /// If `level` is .local then this includes includes locals in all parent scopes
+    local_count: usize,
+
+    /// If `level` is .top this field is garbage
     parent: *Scope,
 
     pub const Level = union(enum) {
@@ -42,16 +48,13 @@ pub const SymbolTable = struct {
     top_scope: *Scope,
     current_scope: *Scope,
 
-    // functions: std.AutoHashMapUnmanaged(*Scope, usize),
-
-    local_count: usize,
-
     pub const SymMap = std.StringHashMapUnmanaged(Symbol);
 
     pub fn init(gpa: Allocator) SymbolTable {
         var arena: std.heap.ArenaAllocator = .init(gpa);
         const top_scope = arena.allocator().create(Scope) catch oom();
         top_scope.* = .{
+            .local_count = 0,
             .parent = undefined,
             .level = .top,
         };
@@ -63,7 +66,6 @@ pub const SymbolTable = struct {
             .current_scope = top_scope,
             .top = .empty,
             .locals = .empty,
-            .local_count = 0,
         };
     }
 
@@ -106,7 +108,7 @@ pub const SymbolTable = struct {
                 st.top.put(st.arena.allocator(), name, sym) catch oom();
             },
             .local => {
-                const stack_slot = st.local_count + st.top.count();
+                const stack_slot = st.current_scope.local_count;
                 const sym: Symbol = .{
                     .type = ty,
                     .scope = st.current_scope,
@@ -117,7 +119,7 @@ pub const SymbolTable = struct {
                 const locals = st.locals.getPtr(st.current_scope).?;
                 locals.put(st.arena.allocator(), name, sym) catch oom();
 
-                st.local_count += 1;
+                st.current_scope.local_count += 1;
             },
         }
     }
@@ -135,7 +137,9 @@ pub const SymbolTable = struct {
     }
 
     pub fn beginScope(st: *SymbolTable) *Scope {
-        const new_scope = st.newScope(.local, st.current_scope);
+        // we assume this is not a function scope so we use the parent scope's `local_count`
+        const parent_local_count = st.current_scope.local_count;
+        const new_scope = st.newScope(.local, parent_local_count, st.current_scope);
         st.locals.put(st.arena.allocator(), new_scope, .empty) catch oom();
         st.current_scope = new_scope;
         return new_scope;
@@ -143,23 +147,26 @@ pub const SymbolTable = struct {
 
     pub fn endScope(st: *SymbolTable) void {
         assert(st.current_scope.level != .top);
-        const locals = st.locals.get(st.current_scope).?;
-        st.local_count -= locals.count();
         st.current_scope = st.current_scope.parent;
     }
 
-    pub fn beginFn(st: *SymbolTable) void {
-        st.local_count = 0;
+    pub fn beginFn(st: *SymbolTable) *Scope {
+        const new_scope = st.newScope(.local, 0, st.current_scope);
+        st.locals.put(st.arena.allocator(), new_scope, .empty) catch oom();
+        st.current_scope = new_scope;
+        return new_scope;
     }
 
     pub fn endFn(st: *SymbolTable) void {
-        _ = st; // autofix
+        assert(st.current_scope.level != .top);
+        st.current_scope = st.current_scope.parent;
     }
 
-    fn newScope(st: *SymbolTable, scope_level: Scope.Level, parent: *Scope) *Scope {
+    fn newScope(st: *SymbolTable, scope_level: Scope.Level, local_count: usize, parent: *Scope) *Scope {
         const scope = st.arena.allocator().create(Scope) catch oom();
         scope.* = .{
             .level = scope_level,
+            .local_count = local_count,
             .parent = parent,
         };
         return scope;
