@@ -21,6 +21,13 @@ const Token = @import("Lexer.zig").Token;
 const Value = @import("value.zig").Value;
 
 const stack_max = 1024;
+const frame_max = 1024;
+
+const CallFrame = struct {
+    function_name: []const u8,
+    /// Pointer into Chunk.code
+    return_address: [*]u8,
+};
 
 pub const Vm = struct {
     gpa: Allocator,
@@ -28,6 +35,8 @@ pub const Vm = struct {
     ip: [*]u8,
     stack: [stack_max]Value,
     stack_top: [*]Value,
+
+    frames: [frame_max]CallFrame,
 
     strings: std.StringHashMapUnmanaged(void),
 
@@ -43,6 +52,7 @@ pub const Vm = struct {
             .gpa = gpa,
             .chunk = undefined,
             .ip = undefined,
+            .frames = undefined,
             .stdout = stdout,
             .stderr = stderr,
             .stack = undefined,

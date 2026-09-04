@@ -62,12 +62,16 @@ fn parseArgs(args: []const []const u8, stderr: *Io.Writer) !Args {
     };
 }
 
+const use_debug_allocator = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer assert(gpa.deinit() == .ok);
-    const alloc = gpa.allocator();
+    var gpa = if (use_debug_allocator) std.heap.DebugAllocator(.{}).init else std.heap.smp_allocator;
+
+    defer if (use_debug_allocator) assert(gpa.deinit() == .ok);
+
+    const alloc = if (use_debug_allocator) gpa.allocator() else gpa;
 
     const stdin = Io.File.stdin();
     _ = stdin; // autofix
@@ -138,6 +142,7 @@ fn runFile(io: Io, gpa: Allocator, path: []const u8, stdout: *Io.Writer, stderr:
         const stmts = debug.printStmts(gpa, nir.stmts);
         defer gpa.free(stmts);
         try stderr.print("{s}\n", .{stmts});
+
         return;
     }
 
