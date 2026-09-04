@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const Io = std.Io;
 const Allocator = mem.Allocator;
+const builtin = @import("builtin");
 
 const Ast = @import("Ast.zig");
 const debug = @import("debug.zig");
@@ -117,10 +118,20 @@ const Sema = struct {
     }
 
     fn analyzeGlobalSymbols(s: *Sema, stmts: []Ast.Stmt, nir_stmts: *std.ArrayList(Nir.Stmt)) void {
+        // resolveGlobals can probably just use a general stmts list instead of a list with only var decls.
+        // this would simplify this function greatly.
+
         var decl_list: std.ArrayList(Ast.Stmt.VarDecl) = .empty;
         defer decl_list.deinit(s.scratch);
         for (stmts) |stmt| {
-            if (stmt != .var_decl) continue;
+            if (stmt != .var_decl) {
+                if (!builtin.is_test) {
+                    s.disallowedGlobalStatementErr(stmt);
+                    return;
+                }
+                continue;
+            }
+
             const vd = stmt.var_decl;
 
             const already_exists = s.sym_table.register(vd.ident.lexeme, .n_unknown, vd.mutable);

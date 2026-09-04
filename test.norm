@@ -9,7 +9,7 @@ add := fn (x: int, y: int) int {
     return x + y;
 }
 
-{
+main := fn () {
     x := sub(2 + 3, 3);
     print(x);
 }

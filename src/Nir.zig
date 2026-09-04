@@ -16,6 +16,8 @@ const Token = @import("Lexer.zig").Token;
 
 const trait = @import("trait.zig");
 
+const Nir = @This();
+
 pub const Scope = struct {
     level: Level,
 

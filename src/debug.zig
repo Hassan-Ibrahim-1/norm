@@ -74,6 +74,7 @@ pub fn disassembleInstruction(
         .op_constant => constantInstruction(w, instruction, chunk, offset),
         .op_constant_long => longConstantInstruction(w, instruction, chunk, offset),
 
+        .op_exit,
         .op_add_int,
         .op_subtract_int,
         .op_multiply_int,
@@ -115,6 +116,7 @@ pub fn disassembleInstruction(
 
         .op_store,
         .op_load,
+        .op_pop_n,
         => shortInstruction(w, instruction, chunk, offset),
 
         .op_jump,
@@ -123,8 +125,6 @@ pub fn disassembleInstruction(
 
         .op_loop,
         => loopInstruction(w, instruction, chunk, offset),
-
-        .op_pop_n => popNInstructions(w, instruction, chunk, offset),
     };
 }
 
@@ -233,17 +233,6 @@ fn loopInstruction(
             line,
         },
     );
-    return offset + 3;
-}
-
-fn popNInstructions(
-    w: *Io.Writer,
-    instruction: OpCode,
-    chunk: *const Chunk,
-    offset: usize,
-) Io.Writer.Error!usize {
-    const n = mem.readInt(u16, chunk.code.items[offset + 1 .. offset + 3].ptr[0..2], .little);
-    try w.print("{t:<16} {d:>4}\n", .{ instruction, n });
     return offset + 3;
 }
 
