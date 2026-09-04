@@ -38,17 +38,15 @@ pub const SymbolTable = struct {
     gpa: Allocator,
     arena: std.heap.ArenaAllocator,
     top: SymMap,
-    locals: std.AutoHashMapUnmanaged(*Scope, Locals),
+    locals: std.AutoHashMapUnmanaged(*Scope, SymMap),
     top_scope: *Scope,
     current_scope: *Scope,
+
+    // functions: std.AutoHashMapUnmanaged(*Scope, usize),
 
     local_count: usize,
 
     pub const SymMap = std.StringHashMapUnmanaged(Symbol);
-
-    pub const Locals = struct {
-        locals: SymMap,
-    };
 
     pub fn init(gpa: Allocator) SymbolTable {
         var arena: std.heap.ArenaAllocator = .init(gpa);
@@ -117,7 +115,7 @@ pub const SymbolTable = struct {
                 };
 
                 const locals = st.locals.getPtr(st.current_scope).?;
-                locals.locals.put(st.arena.allocator(), name, sym) catch oom();
+                locals.put(st.arena.allocator(), name, sym) catch oom();
 
                 st.local_count += 1;
             },
@@ -131,14 +129,14 @@ pub const SymbolTable = struct {
             },
             .local => {
                 const locals = st.locals.get(scope).?;
-                return locals.locals.contains(name) or st.symDefined(name, scope.parent);
+                return locals.contains(name) or st.symDefined(name, scope.parent);
             },
         }
     }
 
     pub fn beginScope(st: *SymbolTable) *Scope {
         const new_scope = st.newScope(.local, st.current_scope);
-        st.locals.put(st.arena.allocator(), new_scope, .{ .locals = .empty }) catch oom();
+        st.locals.put(st.arena.allocator(), new_scope, .empty) catch oom();
         st.current_scope = new_scope;
         return new_scope;
     }
@@ -146,8 +144,16 @@ pub const SymbolTable = struct {
     pub fn endScope(st: *SymbolTable) void {
         assert(st.current_scope.level != .top);
         const locals = st.locals.get(st.current_scope).?;
-        st.local_count -= locals.locals.count();
+        st.local_count -= locals.count();
         st.current_scope = st.current_scope.parent;
+    }
+
+    pub fn beginFn(st: *SymbolTable) void {
+        st.local_count = 0;
+    }
+
+    pub fn endFn(st: *SymbolTable) void {
+        _ = st; // autofix
     }
 
     fn newScope(st: *SymbolTable, scope_level: Scope.Level, parent: *Scope) *Scope {
@@ -172,7 +178,7 @@ pub const SymbolTable = struct {
             .top => return st.top.getPtr(name),
             .local => {
                 const locals = st.locals.getPtr(scope).?;
-                return locals.locals.getPtr(name) orelse st.tryFindScoped(name, scope.parent);
+                return locals.getPtr(name) orelse st.tryFindScoped(name, scope.parent);
             },
         }
     }

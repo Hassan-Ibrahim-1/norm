@@ -469,9 +469,9 @@ pub const Compiler = struct {
     fn endScope(c: *Compiler, line: u32) void {
         defer c.current_scope = c.current_scope.parent;
         const locals = c.sym_table.locals.get(c.current_scope).?;
-        const locals_count = locals.locals.count();
+        const local_count = locals.count();
 
-        c.emitPop(locals_count, line);
+        c.emitPop(local_count, line);
 
         const kv_maybe = c.unpatched_jump_stmts.fetchRemove(c.current_scope);
         if (kv_maybe) |kv| {
