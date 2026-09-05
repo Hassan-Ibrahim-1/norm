@@ -135,7 +135,7 @@ pub const OpCode = enum(u8) {
 
     // op_jump <offset: u16>
     //
-    // Move forward by `offset` instructions
+    // VM: Move forward by `offset` instructions
     op_jump,
 
     // op_jump_forward_if_false <offset: u16>
@@ -151,6 +151,8 @@ pub const OpCode = enum(u8) {
 
     // op_return
     //
+    // VM: Pop call stack and jump to return address, and push a value on the
+    // stack if return type is not void
     op_return,
 
     pub fn byte(op: OpCode) u8 {
@@ -436,7 +438,12 @@ pub const Compiler = struct {
                 gop.value_ptr.append(c.scratch, jump_index) catch oom();
             },
 
-            .return_stmt => @panic("todo"),
+            .return_stmt => |return_stmt| {
+                if (return_stmt.expr) |expr| {
+                    c.expression(expr);
+                }
+                c.emitOpCode(.op_return, return_stmt.token.line);
+            },
         }
     }
 
@@ -612,8 +619,10 @@ pub const Compiler = struct {
     }
 
     fn function(c: *Compiler, f: *Nir.Expr.Function) void {
-        _ = c; // autofix
-        _ = f; // autofix
+        c.beginScope(f.scope);
+        defer c.endScope(f.token.line);
+
+        c.statement(.{ .block = f.body });
     }
 
     fn cast(c: *Compiler, cst: *Nir.Expr.Cast, target: NormType) void {
@@ -2676,43 +2685,69 @@ test "continue statements" {
     }
 }
 
-// test "function declarations" {
-//     @setEvalBranchQuota(10000);
-//
-//     const gpa = testing.allocator;
-//     const tests: []const TestCaseMinimal = &.{
-//         .{
-//             .source =
-//             \\main := fn () {
-//             \\    2 + 2;
-//             \\}
-//             ,
-//
-//             .expected_code = &debug.opCodeToBytes(&.{
-//                 .op_constant, 0,
-//                 .op_constant, 1,
-//                 .op_add_int,  .op_exit,
-//             }),
-//             .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 2 } },
-//         },
-//     };
-//
-//     for (tests) |t| {
-//         errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
-//
-//         var chunk = try testCompile(gpa, t.source);
-//         defer chunk.deinit();
-//
-//         errdefer {
-//             var stderr = Io.File.stderr().writer(testing.io, &.{});
-//             debug.disassembleChunk(&stderr.interface, &chunk, "output chunk", t.source);
-//         }
-//
-//         try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
-//         try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
-//     }
-// }
-//
+test "function declarations" {
+    @setEvalBranchQuota(10000);
+
+    const gpa = testing.allocator;
+    const tests: []const TestCaseMinimal = &.{
+        .{
+            .source =
+            \\test_fn := fn () {
+            \\    2 + 2;
+            \\}
+            ,
+
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_constant, 1,
+                .op_add_int,
+                .op_exit,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 2 } },
+        },
+        .{
+            .source =
+            \\test_fn := fn () {
+            \\    2 + 2;
+            \\}
+            \\
+            \\other_fn := fn () {
+            \\    print("Hello");
+            \\}
+            ,
+
+            // zig fmt: off
+            .expected_code = &debug.opCodeToBytes(&.{
+                .op_constant, 0,
+                .op_constant, 1,
+                .op_add_int,
+                .op_constant, 2,
+                .op_temp_print,
+                .op_exit,
+            }),
+            // zig fmt: on
+            .expected_constants = &.{ .{ .integer = 2 }, .{ .integer = 2 }, .{ .string = .ref("Hello") } },
+        },
+    };
+
+    for (tests) |t| {
+        errdefer std.debug.print("failed test case with source = \"{s}\"\n", .{t.source});
+
+        var chunk = try testCompile(gpa, t.source);
+        defer chunk.deinit();
+
+        errdefer {
+            var stderr = Io.File.stderr().writer(testing.io, &.{});
+            debug.disassembleChunk(&stderr.interface, &chunk, "output chunk", t.source);
+        }
+
+        try testing.expectEqualSlices(u8, t.expected_code, chunk.code.items);
+        try testing.expectEqualDeep(t.expected_constants, chunk.constants.items);
+    }
+}
+
 test "temporary print opcode" {
     const gpa = testing.allocator;
     const tests: []const TestCaseMinimal = &.{

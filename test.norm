@@ -1,15 +1,24 @@
-sub := fn (x: int, y: int) int {
-    // at this point stack slots 0,1,2,3 are occupied
-    return add(x, -y);
+// sub := fn (x: int, y: int) int {
+//     // at this point stack slots 0,1,2,3 are occupied
+//     return add(x, -y);
+// }
+// 
+// add := fn (x: int, y: int) int {
+//     // from: sub
+//     // x: [4], y: [5]
+//     return x + y;
+// }
+// 
+// main := fn () {
+//     x := sub(2 + 3, 3);
+//     print(x);
+// }
+
+
+test_fn := fn () {
+    2 + 2;
 }
 
-add := fn (x: int, y: int) int {
-    // from: sub
-    // x: [4], y: [5]
-    return x + y;
-}
-
-main := fn () {
-    x := sub(2 + 3, 3);
-    print(x);
+other_fn := fn () {
+    print("Hello");
 }
